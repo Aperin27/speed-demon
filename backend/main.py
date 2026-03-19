@@ -70,10 +70,6 @@ async def send_to_room(room_code, message):
 def root():
     return {"message": "Speed Demon server running"}
 
-@app.get("/health")
-def health():
-    return {"ok": True}
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

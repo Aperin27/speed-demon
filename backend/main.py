@@ -194,34 +194,38 @@ async def websocket_endpoint(websocket: WebSocket):
             elif message_type == "play_again":
                 room_code = message.get("room_code", "").upper()
 
-            if room_code not in rooms:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": "Room not found"
-                }))
-                continue
+                if room_code not in rooms:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "Room not found"
+                    }))
+                    continue
 
-            room = rooms[room_code]
+                room = rooms[room_code]
 
-            if current_nickname != room["host"]:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": "Only the host can start a new round"
-                }))
-                continue
+                host_websocket = next((
+                    player["websocket"] for player in room["players"]
+                    if player["nickname"] == room["host"]
+                ), None)
+                if current_room != room_code or websocket is not host_websocket:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "Only the host can start a new round"
+                    }))
+                    continue
 
-            room["started"] = False
-            room["scores"] = {}
-            room["questions"] = []
+                room["started"] = False
+                room["scores"] = {}
+                room["questions"] = []
 
-            player_names = [player["nickname"] for player in room["players"]]
+                player_names = [player["nickname"] for player in room["players"]]
 
-            await send_to_room(room_code, {
-                "type": "returned_to_lobby",
-                "room_code": room_code,
-                "players": player_names,
-                "host": room["host"]
-            })
+                await send_to_room(room_code, {
+                    "type": "returned_to_lobby",
+                    "room_code": room_code,
+                    "players": player_names,
+                    "host": room["host"]
+                })
 
     except WebSocketDisconnect:
         if current_room and current_room in rooms:

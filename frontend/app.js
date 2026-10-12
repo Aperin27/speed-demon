@@ -39,6 +39,7 @@ let timeLeft = 60;
 let score = 0;
 let correctAnswer = 0;
 let timerInterval = null;
+let countdownInterval = null;
 let gameDuration = 60;
 
 let questions = [];
@@ -88,6 +89,25 @@ function connectWebSocket() {
       gameDuration = data.duration;
       currentQuestionIndex = 0;
       startCountdown();
+    }
+
+    if (data.type === "returned_to_lobby") {
+      clearInterval(countdownInterval);
+      clearInterval(timerInterval);
+      countdownInterval = null;
+      timerInterval = null;
+      questions = [];
+      currentQuestionIndex = 0;
+      score = 0;
+      correctAnswer = null;
+      roomCode = data.room_code;
+      players = data.players;
+      host = data.host;
+
+      roomCodeDisplay.textContent = roomCode;
+      updatePlayersList();
+      updateHostControls();
+      showScreen(lobbyScreen);
     }
 
     if (data.type === "game_results") {
@@ -162,7 +182,7 @@ function startCountdown() {
   let count = 3;
   countdownNumber.textContent = count;
 
-  const countdownInterval = setInterval(() => {
+  countdownInterval = setInterval(() => {
     count--;
     countdownNumber.textContent = count;
 
@@ -292,7 +312,7 @@ answerInput.addEventListener("keydown", (event) => {
 
 playAgainBtn.addEventListener("click", () => {
   socket.send(JSON.stringify({
-    type: "play again",
+    type: "play_again",
     room_code: roomCode
   }));
 });

@@ -17,16 +17,17 @@ Speed Demon is a multiplayer arithmetic race: players create or join a room, the
 | `backend/persistence.py` | SQLite outbox, capped exponential retries, background persistence worker. |
 | `backend/requirements.txt`, `backend/.env.example` | Pinned dependencies and non-secret configuration example. |
 | `backend/render.yaml` | Existing empty file; deployment settings must be applied to the existing Render service manually. |
-| `frontend/index.html` | Header/footer, five screen sections, optional Google account controls and always-visible leaderboard panel. Preserves labels, live feedback, skip link and named DOM bindings. |
+| `frontend/index.html` | Five screen sections, home-only Google account controls and leaderboard, native User Guide dialog and decorative SVG/math background. Preserves labels, live feedback, skip link and named DOM bindings. |
 | `frontend/app.js` | Socket protocol, connection cleanup, ID-based host controls, focus/screens, prompt buffer, advisory timer, server acknowledgement scores, results/replay and leaderboard states. |
 | `frontend/auth.js` | Optional Firebase SDK loading, popup Google login, logout and ID-token change notifications. Guest play survives SDK/config failure. |
 | `frontend/config.js` | Public Firebase web configuration; localhost selects local backend, other hosts select existing Render service. No Admin secrets. |
-| `frontend/style.css` | Existing navy/blue/purple responsive design, cards/controls, focus/reduced-motion/hidden rules; account and leaderboard styling. |
+| `frontend/style.css` | Black/charcoal/crimson responsive design, serif title/questions, focused game status/question panels, account/leaderboard/dialog styling and focus/reduced-motion/hidden rules. |
 | `firestore.rules`, `firestore.indexes.json`, `firebase.json` | Deny-all client rules, composite index and manual Firebase CLI deployment definitions. |
 | `vercel.json` | Static `frontend` output with no install/build command; no domain ownership metadata. |
 | `README.md`, `docs/FIREBASE_SETUP.md` | Public link, local commands, exact Firebase/Render/Vercel configuration, deploy procedure, cloud acceptance and free-tier limits. |
 | `tests/test_round_flow.py`, `tests/test_persistence.py` | Isolated handler/security, Firebase adapter/transaction, caching, rollover and outbox tests. |
 | `tests/test_frontend_replay.cjs`, `tests/test_frontend_auth.cjs` | Real client and auth script tests with DOM/socket/timer/SDK doubles. |
+| `tests/test_frontend_browser.cjs` | Optional real Edge/Playwright smoke test against isolated local servers; guest rounds, SDK-fake account layout, responsive screenshots, leaderboard fixtures, results and replay. Uses an existing Playwright installation. |
 | `tests/local_server.py` | Real local Uvicorn server backed by in-memory Firebase fakes; cannot access production Firebase. |
 | `AGENTS.md` | Project-specific instructions for future Codex work. |
 
@@ -58,10 +59,10 @@ Authentication is optional. The Admin SDK checks Google provider, project/signat
 
 ## Frontend interaction and game data flow
 
-1. DOM IDs, CSS `.hidden` and `showScreen` preserve the redesigned home/lobby/countdown/game/results flow and focus transitions. Responsive controls, live feedback and reduced motion remain.
+1. DOM IDs, CSS `.hidden` and `showScreen` preserve the home/lobby/countdown/game/results flow and focus transitions. `app-shell`'s `data-screen` controls spacing/background treatment. Account controls and the leaderboard are nested inside home, so countdown/game/lobby/results fully hide them. The native User Guide dialog supports Escape and restores focus. Responsive controls, live feedback and reduced motion remain.
 2. `enterRoom` validates nickname/code, closes prior sockets and creates one connection. After opening, it sends an optional ID token followed by create/join. `joined` sets the server player ID; room events render player rows and ID-based host controls. Back closes the socket. Errors/disconnects are shown as notices; reconnect is a fresh lobby join, never an active-round restoration.
 3. `auth.js` loads only Firebase app/auth modules. `onIdTokenChanged` dispatches `auth-changed`; the app transports refreshed tokens privately. A missing/broken SDK leaves guest play available. Server `auth_status` distinguishes a Google browser session from verified leaderboard identity.
-4. `game_started` resets local state, receives prompts without answers and computes advisory monotonic display times from server timestamps. The server ends the round independently. The client counts down, focuses answer input and renders progress/urgent time.
+4. `game_started` resets local state, receives prompts without answers and computes advisory monotonic display times from server timestamps. The server ends the round independently. The client counts down, focuses answer input and renders progress/urgent time in minutes:seconds. Active UI shows own confirmed score and room code; the protocol provides no live opponent scores. Operand/operator text nodes allow crimson operators without HTML interpolation; question count has no fixed limit.
 5. Enter (excluding key repeat) and Submit validate numeric input and send question/round IDs, index and answer. The client immediately advances through the buffer; it awards no points. `answer_result` updates score/feedback and adds prompts. Empty buffer temporarily disables controls; an acknowledgement restores focus. Stale acknowledgements/results from another round are ignored. An answer rejection stops local answering and waits for final server results.
 6. Local display expiry disables input and shows waiting results; it sends no score. `game_results` renders server scores/ties and persistence status. Replay cancels the display timer and returns both clients to a fresh lobby. Auth/leave status updates do not restart a round.
 7. Leaderboard tabs, native duration select and Refresh issue HTTP requests without polling. Loading/empty/error states are explicit, stale requests are aborted/ignored and names are rendered as text nodes. Arrow/Home/End keys switch tabs with proper focus/ARIA selection. The list uses server tie ordering.
@@ -101,6 +102,10 @@ git diff --check
 ```
 
 Use `.venv` or `python` instead if dependencies are available there. No additional test packages are needed. Handler/Firestore/auth tests use fakes, while the real browser smoke server exercises real HTTP/WebSocket transport and UI with a fake database. Neither proves deployed Auth/IAM/index/Firestore integration. See `docs/FIREBASE_SETUP.md` for manual settings and acceptance steps.
+
+The backend suite includes 640 ordered submissions per duration (60/120/300/600 seconds), with simulated backend time, 32-question lookahead, private answer keys, wrong-answer consumption, duplicate rejection and exact-deadline enforcement. Backend scoring/buffering is unchanged.
+
+For optional browser screenshots, start both local servers above, set `PLAYWRIGHT_MODULE_PATH` to an existing Playwright package path if it is not on Node's module search path, then run `node tests/test_frontend_browser.cjs`. It uses installed Edge by default (`BROWSER_CHANNEL` can override), writes ignored `test-artifacts/*.png`, and runs one actual 60-second round. Account layout uses isolated Firebase SDK modules; leaderboard populated/error states use explicitly labelled HTTP fixtures. Primary screenshots use the real, empty local leaderboard and guest rounds. No production Firebase data is accessed.
 
 ## Known limitations and verification boundaries
 

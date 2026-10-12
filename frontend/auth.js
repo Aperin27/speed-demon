@@ -5,6 +5,10 @@
   const signOutButton = document.getElementById("sign-out-btn");
   let auth = null;
   let sdk = null;
+  function reportStatus(message) {
+    status.textContent = message;
+    status.classList.remove("visually-hidden");
+  }
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
   window.speedDemonAuth = {
@@ -22,8 +26,10 @@
   };
   function changed(user) {
     status.textContent = user ? `Google: ${user.displayName || "Player"}. Ranking requires server verification.` : "Guest · Sign in before a round for rankings.";
+    status.classList.add("visually-hidden");
     signInButton.classList[user ? "add" : "remove"]("hidden");
     signOutButton.classList[user ? "remove" : "add"]("hidden");
+    signOutButton.textContent = user ? `${user.displayName || "Player"} · Sign Out` : "Sign Out";
     resolveReady();
     window.dispatchEvent(new Event("auth-changed"));
   }
@@ -32,25 +38,25 @@
     try {
       await sdk.signInWithPopup(auth, new sdk.GoogleAuthProvider());
     } catch {
-      status.textContent = "Sign-in could not complete. Allow popups or continue as a guest.";
+      reportStatus("Sign-in could not complete. Allow popups or continue as a guest.");
     } finally {
       signInButton.disabled = false;
     }
   });
   signOutButton.addEventListener("click", async () => {
     try { await sdk.signOut(auth); }
-    catch { status.textContent = "Sign-out failed. Try again."; }
+    catch { reportStatus("Sign-out failed. Try again."); }
   });
   async function initialize() {
     const config = window.SPEED_DEMON_CONFIG.firebase;
     if (!config.apiKey || !config.appId) {
-      status.textContent = "Guest · Google sign-in awaits Firebase web configuration.";
+      reportStatus("Guest · Google sign-in awaits Firebase web configuration.");
       signInButton.disabled = true;
       resolveReady();
       return;
     }
     const timeout = setTimeout(() => {
-      status.textContent = "Google sign-in is taking longer than expected. Guest play is available.";
+      reportStatus("Google sign-in is taking longer than expected. Guest play is available.");
       resolveReady();
     }, 8000);
     try {
@@ -66,7 +72,7 @@
       signInButton.disabled = false;
     } catch {
       clearTimeout(timeout);
-      status.textContent = "Google sign-in unavailable. Guest play is available.";
+      reportStatus("Google sign-in unavailable. Guest play is available.");
       signInButton.disabled = true;
       resolveReady();
     }

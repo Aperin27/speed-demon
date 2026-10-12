@@ -312,6 +312,49 @@ class RoundFlowTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(main, "time", clock), self.assertRaises(ValueError):
             await main.handle_message(player, self.answer(self.host_id))
 
+    async def test_640_questions_for_every_duration_with_simulated_time(self):
+        for duration in main.DURATIONS:
+            with self.subTest(duration=duration):
+                started = (await self.start(duration))[0]
+                state = self.room["round"]
+                participant = state["participants"][self.host_id]
+                member = next(player for player in self.room["players"] if player["id"] == self.host_id)
+                issued = {prompt["index"]: prompt for prompt in started["questions"]}
+                self.assertEqual(len(issued), 32)
+                # Replace only the backend's clock reference, leaving asyncio's clock real.
+                clock = unittest.mock.Mock(wraps=time)
+                with patch.object(main, "time", clock):
+                    for index in range(640):
+                        clock.monotonic.return_value = state["start"] + duration * (index + 1) / 641
+                        prompt = issued.pop(index)
+                        self.assertEqual(prompt["question_id"], state["questions"][index]["question_id"])
+                        self.assertEqual(set(prompt), {"index", "question_id", "question"})
+                        answer = self.answer(self.host_id, correct=index % 4 != 0)
+                        await main.handle_message(member, answer)
+                        acknowledgement = await self.receive(self.host, "answer_result")
+                        self.assertEqual(acknowledgement["index"], index)
+                        self.assertEqual(len(acknowledgement["questions"]), 1)
+                        tail = acknowledgement["questions"][0]
+                        self.assertEqual(tail["index"], index + 32)
+                        self.assertEqual(set(tail), {"index", "question_id", "question"})
+                        issued[tail["index"]] = tail
+                        self.assertEqual(len(issued), 32)
+                        self.assertEqual(participant["issued"] - participant["next"], 32)
+                        if index % 32 == 0:
+                            with self.assertRaisesRegex(ValueError, "Duplicate"):
+                                await main.handle_message(member, answer)
+                        self.assertEqual(participant["score"], index + 1 - (index // 4 + 1))
+                        self.assertLess(len(state["questions"]) - participant["issued"], 32)
+                    clock.monotonic.return_value = state["end"]
+                    with self.assertRaisesRegex(ValueError, "outside round time"):
+                        await main.handle_message(member, self.answer(self.host_id))
+                self.assertEqual(participant["next"], 640)
+                self.assertEqual(participant["score"], 480)
+                self.assertEqual(len({q["question_id"] for q in state["questions"]}), len(state["questions"]))
+                await self.finish()
+                await self.host.send({"type": "play_again", "room_code": self.code})
+                await self.broadcast("returned_to_lobby")
+
     async def test_all_durations_and_buffer_replenishment(self):
         for duration in main.DURATIONS:
             await self.start(duration)

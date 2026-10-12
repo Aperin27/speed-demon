@@ -53,6 +53,8 @@ let lastToken;
 function showScreen(screen) {
   [homeScreen, lobbyScreen, countdownScreen, gameScreen, resultScreen].forEach((element) => element.classList.add("hidden"));
   screen.classList.remove("hidden");
+  document.getElementById("app-shell").setAttribute("data-screen", screen.id.replace("-screen", ""));
+  if (screen === countdownScreen || screen === gameScreen) notice("");
   screen.focus();
 }
 
@@ -268,6 +270,23 @@ function showCurrentQuestion() {
   answerInput.disabled = !enabled;
   submitBtn.disabled = !enabled;
   questionDisplay.textContent = question?.question || "Buffering questions…";
+  questionDisplay.classList[question ? "remove" : "add"]("question-buffering");
+  if (question) {
+    const parts = question.question.match(/^(-?\d+)\s+([+−×÷*\/\-])\s+(-?\d+)$/);
+    if (parts) {
+      questionDisplay.textContent = "";
+      const left = document.createElement("span");
+      left.textContent = parts[1];
+      const operator = document.createElement("span");
+      operator.className = "question-operator";
+      operator.textContent = { "*": "×", "/": "÷", "-": "−" }[parts[2]] || parts[2];
+      const right = document.createElement("span");
+      right.textContent = parts[3];
+      questionDisplay.appendChild(left);
+      questionDisplay.appendChild(operator);
+      questionDisplay.appendChild(right);
+    }
+  }
   questionNumber.textContent = `Question ${currentQuestionIndex + 1}`;
   if (wasDisabled && enabled) answerInput.focus();
 }
@@ -279,6 +298,7 @@ function tickClock() {
     if (now >= startsAt) {
       phase = "game";
       scoreDisplay.textContent = 0;
+      document.getElementById("game-room-code").textContent = roomCode;
       timeProgress.max = gameDuration;
       setAnswerFeedback("Go! One point per correct answer.");
       showScreen(gameScreen);
@@ -289,7 +309,7 @@ function tickClock() {
   }
   if (phase === "game") {
     const remaining = Math.max(0, Math.ceil((endsAt - now) / 1000));
-    timerDisplay.textContent = remaining;
+    timerDisplay.textContent = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
     timeProgress.value = remaining;
     timerDisplay.classList[remaining <= 10 ? "add" : "remove"]("urgent");
     if (now >= endsAt) endGame();
@@ -416,3 +436,7 @@ allTimeTab.addEventListener("click", () => selectLeaderboard("all_time"));
 leaderboardDuration.addEventListener("change", loadLeaderboard);
 document.getElementById("leaderboard-refresh").addEventListener("click", loadLeaderboard);
 loadLeaderboard();
+
+const guideDialog = document.getElementById("guide-dialog");
+document.getElementById("guide-btn").addEventListener("click", () => guideDialog.showModal());
+document.getElementById("guide-close").addEventListener("click", () => guideDialog.close());

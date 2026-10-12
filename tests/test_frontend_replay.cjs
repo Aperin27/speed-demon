@@ -14,7 +14,9 @@ const elements = new Map();
 function createElement() {
   const classes = new Set(["hidden"]);
   return {
-    value: "", textContent: "", disabled: false, style: {}, children: [], listeners: {},
+    value: "", disabled: false, style: {}, children: [], listeners: {},
+    get textContent() { return (this.text || "") + this.children.map((child) => child.textContent).join(""); },
+    set textContent(value) { this.text = String(value); this.children = []; },
     get innerHTML() { return this.html || ""; },
     set innerHTML(value) { this.html = value; this.children = []; },
     classList: {
@@ -25,13 +27,15 @@ function createElement() {
     addEventListener(event, callback) { this.listeners[event] = callback; },
     setAttribute(name, value) { this[name] = value; },
     appendChild(child) { this.children.push(child); },
-    focus() { focusedElement = this; }
+    focus() { focusedElement = this; },
+    showModal() { this.open = true; },
+    close() { this.open = false; }
   };
 }
 const document = {
   getElementById(id) {
     assert.ok(ids.includes(id), `Missing HTML binding: ${id}`);
-    if (!elements.has(id)) elements.set(id, createElement());
+    if (!elements.has(id)) elements.set(id, Object.assign(createElement(), { id }));
     return elements.get(id);
   },
   createElement
@@ -93,6 +97,10 @@ function enterLobby() {
 
 (async () => {
   await flush();
+  element("guide-btn").listeners.click();
+  assert.equal(element("guide-dialog").open, true);
+  element("guide-close").listeners.click();
+  assert.equal(element("guide-dialog").open, false);
   assert.match(element("leaderboard-status").textContent, /No ranked rounds/);
   element("nickname").value = "Host";
   element("duration").value = "60";
@@ -102,6 +110,7 @@ function enterLobby() {
   assert.deepEqual(socket.sent, [{ type: "authenticate", id_token: null }, { type: "create_room", nickname: "Host" }]);
   enterLobby();
   assert.equal(focusedElement, element("lobby-screen"));
+  assert.equal(element("app-shell")["data-screen"], "lobby");
   assert.equal(element("player-count").textContent, "2 players");
   receive(round("abandoned"));
   assert.equal(intervals.size, 1);
@@ -110,6 +119,10 @@ function enterLobby() {
 
   receive(round("first"));
   advance(3000);
+  assert.equal(element("app-shell")["data-screen"], "game");
+  assert.equal(element("home-screen").classList.contains("hidden"), true);
+  assert.equal(element("game-room-code").textContent, "AB12CD");
+  assert.equal(element("timer").textContent, "01:00");
   assert.equal(read("phase"), "game");
   assert.equal(focusedElement, element("answer-input"));
   const answer = element("answer-input");
@@ -125,7 +138,7 @@ function enterLobby() {
   assert.equal(read("currentQuestionIndex"), 1);
   assert.equal(read("score"), 0, "No client-side scoring");
   assert.deepEqual(socket.sent.at(-1), { type: "answer", room_code: "AB12CD", round_id: "first", index: 0, question_id: "q0", answer: 2 });
-  assert.equal(element("question").textContent, "1 - 2", "Next question immediately, without waiting for latency");
+  assert.equal(element("question").textContent, "1−2", "Next question immediately, without waiting for latency");
   answer.value = "-1";
   key();
   assert.equal(answer.disabled, true);

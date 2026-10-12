@@ -3,66 +3,50 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#080e20" />
-  <meta name="description" content="Challenge your friends to a live arithmetic race. A little maths. A little rivalry." />
-  <title>Speed Demon · Race your friends</title>
+  <meta name="theme-color" content="#09090b" />
+  <meta name="description" content="Speed-Demons multiplayer arithmetic race." />
+  <title>Speed-Demons</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to game</a>
-  <div class="container">
-    <header class="site-header">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2 4 14h7l-1 8 10-12h-7z" /></svg></span>
-        <span>speed<span class="brand-accent">demon</span><span class="brand-dot">.</span></span>
-      </div>
-      <span class="header-tag"><span class="status-dot" aria-hidden="true"></span> Multiplayer maths</span>
-    </header>
-    <div class="auth-panel" aria-label="Google account">
-      <p id="auth-status" role="status">Guest · Sign in before a round for rankings.</p>
-      <button id="sign-in-btn" class="button-secondary" type="button" disabled>Sign in with Google</button>
-      <button id="sign-out-btn" class="button-quiet hidden" type="button">Sign out</button>
-    </div>
+  <div class="math-background" aria-hidden="true"><svg class="edge-light" viewBox="0 0 1672 941" preserveAspectRatio="none"><path d="M1430 -20 C1550 20 1630 100 1690 210 M-20 420 C40 560 140 650 300 680 M1695 620 C1660 810 1480 890 1280 920" /></svg><span>+</span><span>×</span><span>÷</span><span>−</span></div>
+  <div class="container" id="app-shell" data-screen="home">
     <p id="app-notice" class="notice hidden" role="status" aria-live="polite"></p>
     <main id="main-content" tabindex="-1">
       <section id="home-screen" class="screen home-layout" tabindex="-1" aria-labelledby="home-title">
-        <div class="hero">
-          <p class="eyebrow">↗ SMALL QUESTIONS. BIG COMPETITION.</p>
-          <h1 id="home-title">Quick maths.<br /><span>Faster minds.</span></h1>
-          <p class="hero-description">Turn a little mental maths into a friendly rivalry. One room, the same questions, and a race against the clock.</p>
-          <div class="math-art" aria-hidden="true">
-            <span class="art-label">YOUR NEXT CHALLENGE</span>
-            <div class="art-equation">12 <span>×</span> 8 <span>=</span> <b>?</b></div>
-            <span class="art-caption"><span class="status-dot"></span> Think fast. Every point counts.</span>
-            <span class="art-orbit orbit-one">+</span><span class="art-orbit orbit-two">÷</span>
+        <h1 id="home-title">Speed<span>-Demons</span></h1>
+        <div class="entry-controls">
+          <div class="card entry-card">
+            <label for="nickname">Nickname</label>
+            <div class="icon-input"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-3c0-6 16-6 16 0v3Z"/></svg></span><input id="nickname" type="text" maxlength="24" placeholder="Enter your nickname" autocomplete="nickname" /></div>
+            <button id="create-room-btn" class="button-primary" type="button">Create Room <span aria-hidden="true">→</span></button>
+            <p id="connection-message" class="notice hidden" role="status"></p>
+            <div class="divider"><span>OR</span></div>
+            <label for="room-code-input">Room code</label>
+            <div class="join-row"><div class="icon-input"><span aria-hidden="true">#</span><input id="room-code-input" type="text" maxlength="6" placeholder="Enter room code" autocomplete="off" autocapitalize="characters" spellcheck="false" /></div><button id="join-room-btn" class="button-secondary" type="button">Join Room</button></div>
           </div>
-          <div class="hero-tags"><span>No downloads</span><span>No sign-up</span><span>Just your brain</span></div>
-        </div>
-        <div class="card entry-card">
-          <p class="eyebrow">LET'S PLAY</p>
-          <h2>Bring your game face.</h2>
-          <p class="muted">Pick a name. Challenge a friend.</p>
-          <label for="nickname">Your nickname</label>
-          <input id="nickname" type="text" maxlength="24" placeholder="Enter your nickname" autocomplete="nickname" aria-describedby="nickname-hint" />
-          <p id="nickname-hint" class="field-hint">This is how you'll appear in the room.</p>
-          <button id="create-room-btn" class="button-primary" type="button">Create Room <span aria-hidden="true">↗</span></button>
-          <p id="connection-message" class="notice hidden" role="status"></p>
-          <div class="divider"><span>Have an invite?</span></div>
-          <label for="room-code-input">Room code</label>
-          <div class="join-row">
-            <input id="room-code-input" type="text" placeholder="Enter room code" autocomplete="off" autocapitalize="characters" spellcheck="false" />
-            <button id="join-room-btn" class="button-secondary" type="button">Join Room</button>
+          <div class="secondary-controls">
+            <button id="guide-btn" class="button-secondary" type="button"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v16M12 5C8 2 5 3 2 4v16c3-1 6-2 10 1 4-3 7-2 10-1V4c-3-1-6-2-10 1Z"/></svg></span> User Guide</button>
+            <div class="account-control"><button id="sign-in-btn" class="button-secondary" type="button" disabled><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 3h8v18h-8M3 12h13m-5-5 5 5-5 5"/></svg></span> Sign In</button><button id="sign-out-btn" class="button-secondary hidden" type="button">Sign Out</button></div>
           </div>
-          <div class="entry-note"><span aria-hidden="true">◎</span> A quick break. A sharper mind.</div>
+          <p id="auth-status" class="auth-status visually-hidden" role="status">Guest · Sign in before a round for rankings.</p>
         </div>
-        <ol class="how-it-works" aria-label="How to play">
-          <li><span class="step-number">01</span><div><strong>Gather your rivals</strong><p>Create a room and share the code.</p></div></li>
-          <li><span class="step-number">02</span><div><strong>Race the clock</strong><p>One point per correct answer.</p></div></li>
-          <li><span class="step-number">03</span><div><strong>Settle the score</strong><p>Compare results. Go for a rematch.</p></div></li>
-        </ol>
+        <section class="card leaderboard-card" aria-labelledby="leaderboard-title">
+          <div class="leaderboard-heading">
+            <h2 id="leaderboard-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h12v6c0 5-3 7-6 7s-6-2-6-7ZM6 4H2v3c0 4 3 5 6 5M18 4h4v3c0 4-3 5-6 5M12 15v5M7 22h10M9 20h6"/></svg> Leaderboard</h2>
+            <div class="leaderboard-controls">
+              <div role="tablist" aria-label="Leaderboard period"><button id="weekly-tab" role="tab" aria-selected="true" aria-controls="leaderboard-panel" type="button">Weekly</button><button id="all-time-tab" role="tab" aria-selected="false" aria-controls="leaderboard-panel" tabindex="-1" type="button">All-Time</button></div>
+              <label for="leaderboard-duration">Round length</label><select id="leaderboard-duration"><option value="60">1 Minute</option><option value="120">2 Minutes</option><option value="300">5 Minutes</option><option value="600">10 Minutes</option></select>
+            </div>
+          </div>
+          <div class="board-columns" aria-hidden="true"><span>#</span><span>Player</span><span>Score</span></div>
+          <div id="leaderboard-panel" role="tabpanel" aria-labelledby="weekly-tab" tabindex="0"><ol id="leaderboard-list" aria-label="Top players"></ol><p id="leaderboard-status" class="field-hint" role="status">Loading rankings…</p></div>
+          <div class="leaderboard-footer"><span>Top 10 · Best single-round scores</span><button id="leaderboard-refresh" class="button-quiet" type="button">Refresh ↻</button></div>
+        </section>
       </section>
       <section id="lobby-screen" class="screen centered-screen hidden" tabindex="-1" aria-labelledby="lobby-title">
-        <div class="screen-heading"><p class="eyebrow">THE ROOM IS YOURS</p><h1 id="lobby-title">Your next rivalry starts here.</h1><p class="muted">Share the code, gather your friends, and get ready.</p></div>
+        <div class="screen-heading"><p class="eyebrow">WAITING TO START</p><h1 id="lobby-title">Room lobby</h1><p class="muted">Share the code, gather your friends, and get ready.</p></div>
         <div class="card lobby-card">
           <div class="room-banner"><div><p class="eyebrow">ROOM CODE</p><span id="room-code-display" class="room-code">—</span></div><span class="pill"><span class="status-dot" aria-hidden="true"></span> Lobby</span></div>
           <div class="lobby-grid">
@@ -73,47 +57,45 @@
         </div>
       </section>
       <section id="countdown-screen" class="screen centered-screen hidden" tabindex="-1" aria-labelledby="countdown-title">
-        <div class="card countdown-card"><p class="eyebrow">TAKE A BREATH. THEN GO.</p><h1 id="countdown-title">Ready, set…</h1><p id="countdown-number" role="status" aria-label="Countdown">3</p><p class="muted">Same questions. Your own pace.</p></div>
+        <div class="card countdown-card"><p class="eyebrow">ROUND STARTING</p><h1 id="countdown-title">Ready, set…</h1><p id="countdown-number" role="status" aria-label="Countdown">3</p><p class="muted">Get ready.</p></div>
       </section>
+
       <section id="game-screen" class="screen centered-screen hidden" tabindex="-1" aria-labelledby="game-title">
         <h1 id="game-title" class="visually-hidden">Maths race</h1>
-        <div class="game-heading"><span class="eyebrow"><span class="status-dot" aria-hidden="true"></span> ROUND IN PROGRESS</span><span id="question-number" class="pill">Question 1</span></div>
-        <div class="card game-card">
-          <div class="top-bar"><div class="time-stat"><span class="stat-label">Time left</span><div><span id="timer">60</span><span class="stat-unit">s</span></div></div><div class="score-stat"><span class="stat-label">Your score</span><div><span id="score">0</span><span class="stat-unit">pts</span></div></div></div>
+        <div class="card game-status">
+          <div class="top-bar">
+            <div class="score-stat"><span class="stat-label">Your score</span><strong id="score">0</strong></div>
+            <div class="room-stat"><span class="stat-label">Room Code</span><strong id="game-room-code">—</strong></div>
+            <div class="time-stat"><span class="stat-label">Round Time</span><strong id="timer">60</strong><span class="visually-hidden">seconds remaining</span></div>
+          </div>
           <progress id="time-progress" max="60" value="60" aria-label="Time remaining"></progress>
-          <div class="question-box"><p class="eyebrow">SOLVE THIS</p><div class="equation"><h2 id="question">5 + 3</h2><span aria-hidden="true">= <b>?</b></span></div></div>
+        </div>
+        <div class="card game-card">
+          <p id="question-number" class="question-number">Question 1</p>
+          <div class="question-box"><h2 id="question">Waiting for question…</h2></div>
           <label for="answer-input" class="visually-hidden">Your answer</label>
-          <div class="answer-row"><input id="answer-input" type="number" step="1" placeholder="Type answer" autocomplete="off" aria-describedby="answer-hint answer-feedback" /><button id="submit-btn" class="button-primary" type="button">Submit <span aria-hidden="true">↵</span></button></div>
-          <p id="answer-feedback" class="answer-feedback" role="status" aria-atomic="true">You've got this. Make the first move.</p>
-          <p id="answer-hint" class="field-hint keyboard-hint">Type your answer and press <kbd>Enter</kbd>. Scores are confirmed by the server.</p>
-          <p id="ranked-status" class="field-hint" role="status"></p>
+          <div class="answer-row"><input id="answer-input" type="number" inputmode="numeric" step="1" placeholder="Your answer…" autocomplete="off" aria-describedby="answer-hint answer-feedback" /><button id="submit-btn" class="button-primary" type="button" aria-label="Submit answer"><span aria-hidden="true">→</span></button></div>
+          <p id="answer-feedback" class="answer-feedback" role="status" aria-atomic="true"></p>
+          <p id="answer-hint" class="visually-hidden">Press Enter to submit. Each correct answer earns one point.</p>
+          <p id="ranked-status" class="visually-hidden" role="status"></p>
         </div>
       </section>
       <section id="result-screen" class="screen centered-screen hidden" tabindex="-1" aria-labelledby="result-title">
-        <div class="card result-card"><div class="result-icon" aria-hidden="true">★</div><p class="eyebrow">THAT'S A WRAP</p><h1 id="result-title">Round complete.</h1><p id="winner-text" class="winner-text" role="status">Waiting for other player...</p><div class="players-box results-box"><h2>Round scores</h2><ul id="results-list" aria-label="Round scores"></ul></div><button id="play-again-btn" class="button-primary" type="button">Play Again <span aria-hidden="true">↗</span></button><p id="result-note" class="field-hint">Another round. Another chance.</p></div>
+        <div class="card result-card"><div class="result-icon" aria-hidden="true">★</div><p class="eyebrow">FINAL SCORES</p><h1 id="result-title">Round complete.</h1><p id="winner-text" class="winner-text" role="status">Waiting for other player...</p><div class="players-box results-box"><h2>Round scores</h2><ul id="results-list" aria-label="Round scores"></ul></div><button id="play-again-btn" class="button-primary" type="button">Play Again <span aria-hidden="true">↗</span></button><p id="result-note" class="field-hint">Another round. Another chance.</p></div>
       </section>
-      <section class="card leaderboard-card" aria-labelledby="leaderboard-title">
-        <div class="panel-heading"><h2 id="leaderboard-title">The fastest minds</h2><span class="pill">Top 10</span></div>
-        <p class="muted">Best single-round scores. Sign in with Google to compete.</p>
-        <div class="leaderboard-controls">
-          <div role="tablist" aria-label="Leaderboard period">
-            <button id="weekly-tab" role="tab" aria-selected="true" aria-controls="leaderboard-panel" type="button" class="button-secondary">Weekly</button>
-            <button id="all-time-tab" role="tab" aria-selected="false" aria-controls="leaderboard-panel" tabindex="-1" type="button" class="button-quiet">All-Time</button>
-          </div>
-          <div><label for="leaderboard-duration">Round length</label><select id="leaderboard-duration"><option value="60">1 Minute</option><option value="120">2 Minutes</option><option value="300">5 Minutes</option><option value="600">10 Minutes</option></select></div>
-          <button id="leaderboard-refresh" class="button-quiet" type="button">Refresh</button>
-        </div>
-        <div id="leaderboard-panel" role="tabpanel" aria-labelledby="weekly-tab" tabindex="0">
-          <p id="leaderboard-status" class="field-hint" role="status">Loading rankings…</p>
-          <ol id="leaderboard-list" aria-label="Top players"></ol>
-        </div>
-        <p class="field-hint">Weeks begin Monday at 00:00 in Johannesburg. Rounds belong to the week they start.</p>
-      </section>
+
     </main>
-    <footer class="site-footer"><span>A little maths. A little rivalry.</span><span>MADE FOR QUICK MINDS ↗</span></footer>
   </div>
-  <script src="config.js"></script>
-  <script src="auth.js"></script>
-  <script src="app.js"></script>
+  <dialog id="guide-dialog" aria-labelledby="guide-title">
+    <div class="guide-heading"><h2 id="guide-title">User Guide</h2><button id="guide-close" class="button-quiet" type="button" aria-label="Close user guide">×</button></div>
+    <dl>
+      <dt>Rooms</dt><dd>Enter a nickname to create a room. Share its code, or enter a friend's code and select Join Room. The host starts with at least two players.</dd>
+      <dt>Duration</dt><dd>The host chooses 1, 2, 5 or 10 minutes. Questions continue until time runs out.</dd>
+      <dt>Answers &amp; scoring</dt><dd>Type a number and press Enter or the arrow. Each correct answer earns one point; an incorrect answer advances to the next question. The server confirms scores and the deadline.</dd>
+      <dt>Results</dt><dd>The highest score wins. Equal highest scores share the win. The host can select Play Again for a new round.</dd>
+      <dt>Rankings</dt><dd>Guest play is available. Sign in with Google before the round starts to qualify for Weekly and All-Time rankings for that duration. Stay connected and keep the same account throughout the round.</dd>
+    </dl>
+  </dialog>
+  <script src="config.js"></script><script src="auth.js"></script><script src="app.js"></script>
 </body>
 </html>

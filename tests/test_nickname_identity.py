@@ -11,6 +11,7 @@ from tests.test_round_flow import Client
 class NicknameIdentityTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         main.rooms.clear()
+        main.security.limiter.clear()
         self.firebase = LocalFirebase()
         self.firebase_patch = patch.object(main, "firebase", self.firebase)
         self.firebase_patch.start()

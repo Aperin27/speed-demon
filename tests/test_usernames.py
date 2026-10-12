@@ -107,6 +107,9 @@ class UsernameTests(unittest.TestCase):
 
 
 class ProfileEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        main.security.limiter.clear()
+
     async def test_verified_uid_only_and_private_response(self):
         identity = {"uid": "verified-uid", "username": None, "exp": time.time() + 60}
         with patch.object(main.firebase, "verify_token", return_value=identity), patch.object(main.firebase, "register_username", return_value="New_Player") as register:

@@ -69,8 +69,10 @@ In the existing Vercel project, use the repository root as Root Directory, frame
 
 ```text
 Build command: pip install -r backend/requirements.txt
-Start command: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1 --ws-max-size 16384
+Start command: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1 --ws-max-size 16384 --no-proxy-headers --forwarded-allow-ips "" --no-access-log --log-level info
 ```
+
+For the existing public Render web service, set `SD_CLIENT_IP_MODE=render-cloudflare` and leave `SD_TRUSTED_PROXY_CIDRS` empty, subject to the public-ingress/trusted-private-network boundary in [SECURITY.md](SECURITY.md). Render automatically supplies `RENDER=true` and `RENDER_SERVICE_TYPE=web`; do not set these manually. Its Python runtime also defaults `FORWARDED_ALLOW_IPS` to `*`, overridden by the explicit empty command-line value above. No verified inbound proxy CIDR is available; outbound ranges must not be substituted. If private/direct callers are untrusted or the ingress contract cannot be confirmed, use `proxy-cidrs` with an empty list as the anti-spoofing fallback and block general public release because users would share proxy quotas. Live Dashboard values were not inspected, and no hosting changes were applied.
 
 Keep the existing Oregon service and `https://speed-demom.onrender.com` endpoint unless the owner verifies a different existing service URL. Run exactly one worker/instance; rooms are in memory and cannot span workers. Add the credentials/environment settings above. Do not import a new Render blueprint or create new hosting services.
 

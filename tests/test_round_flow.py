@@ -11,6 +11,7 @@ from backend import main
 class Client:
     def __init__(self, origin="http://localhost:5500"):
         self.headers = {"origin": origin}
+        self.scope = {"client": ("127.0.0.1", 12345), "headers": []}
         self.incoming = asyncio.Queue()
         self.outgoing = asyncio.Queue()
         self.closed = None
@@ -18,8 +19,11 @@ class Client:
     async def accept(self):
         pass
 
-    async def close(self, code):
+    async def close(self, code, reason=None):
         self.closed = code
+
+    async def receive(self):
+        return {"type": "websocket.receive", "text": await self.receive_text()}
 
     async def receive_text(self):
         message = await self.incoming.get()
@@ -37,6 +41,7 @@ class Client:
 class RoundFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         main.rooms.clear()
+        main.security.limiter.clear()
         self.reservations = patch.object(main.firebase, "nickname_reserved", return_value=False)
         self.lookup = self.reservations.start()
         self.profiles = patch.object(main.firebase, "get_username", side_effect=lambda uid: next((p["identity"].get("username") for room in main.rooms.values() for p in room["players"] if p["identity"] and p["identity"]["uid"] == uid), None))

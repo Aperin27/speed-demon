@@ -14,7 +14,7 @@ Python 3.13 and Node.js are suitable for the checked-in verification commands. N
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
-.\.venv\Scripts\python.exe -B -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --ws-max-size 16384
+.\.venv\Scripts\python.exe -B -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --ws-max-size 16384 --no-proxy-headers --no-access-log
 ```
 
 In a second terminal:
@@ -48,3 +48,5 @@ Python tests exercise the real WebSocket handler, Firebase adapter transactions 
 Keep the existing Vercel frontend and Render backend. Vercel serves `frontend/` without a build. Configure the existing Render service's root as the repository root, build with `pip install -r backend/requirements.txt`, and start with `uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1 --ws-max-size 16384`.
 
 The public Firebase web configuration is in `frontend/config.js`. Admin credentials belong only in Render secret files/environment settings. Client Firestore access stays denied. Follow [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md) before deploying; no deployment or credential provisioning is performed by these source changes.
+
+See [backend security controls](docs/SECURITY.md) for rate limits, idle-room cleanup, fast-answer exemptions and required trusted-proxy configuration before any approved deployment.

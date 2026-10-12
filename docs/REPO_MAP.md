@@ -6,13 +6,14 @@ Speed Demon is a multiplayer arithmetic race: players create or join a room, the
 
 - Backend: Python, FastAPI, Uvicorn, WebSockets and firebase-admin, pinned in `backend/requirements.txt`. Rooms and live rounds occupy one process; Google Authentication and Firestore support optional persistent rankings.
 - Frontend: static HTML/CSS and plain browser JavaScript. No framework, npm manifest or bundler; only Firebase app/auth modules are dynamically imported from the official CDN, pinned to 13.0.0.
-- Persistence: completed Firestore round records and per-UID best entries, with a local SQLite retry outbox. Guests do not require Firebase availability.
+- Persistence: completed Firestore round records and per-UID best entries, with a local SQLite retry outbox. Guest admission/new rounds require reservation lookup availability; active answers do not require Firestore reads.
 
 ## Entry points and important files
 
 | Path | Responsibility |
 | --- | --- |
 | `backend/main.py` | FastAPI app, origin/member/host checks, socket identity, room lifecycle, private question generation, authoritative deadlines/scoring and leaderboard HTTP cache. |
+| `backend/security.py` | Configurable bounded token buckets, explicit CIDR/direct or Render public-ingress IP selection, HTTP body/JSON guards, protocol schema checks and throttled operational diagnostics. |
 | `backend/firebase_service.py` | Lazy Admin initialization, verified Google identities, permanent profile/username transactions, week/version/duration board keys, idempotent round transactions and indexed top-10 queries. |
 | `backend/persistence.py` | SQLite outbox, capped exponential retries, background persistence worker. |
 | `backend/requirements.txt`, `backend/.env.example` | Pinned dependencies and non-secret configuration example. |
@@ -29,6 +30,7 @@ Speed Demon is a multiplayer arithmetic race: players create or join a room, the
 | `tests/test_frontend_replay.cjs`, `tests/test_frontend_auth.cjs` | Real client and auth script tests with DOM/socket/timer/SDK doubles. |
 | `tests/test_frontend_browser.cjs` | Optional real Edge/Playwright smoke test against isolated local servers; guest rounds, SDK-fake account layout, responsive screenshots, leaderboard fixtures, results and replay. Uses an existing Playwright installation. |
 | `tests/test_usernames.py`, `tests/test_feature_browser.cjs` | Concurrent Firestore-transaction fakes, permanent names/profile endpoints, scoring-version isolation; real local Edge/Chrome registration, ranking eligibility, negative persistence and replay. |
+| `tests/test_security.py`, `docs/SECURITY.md` | Focused limiter/proxy/connection/expiration/fast-answer checks and documented controls, defaults, configuration and remaining risks. |
 | `tests/local_server.py` | Real local Uvicorn server backed by in-memory Firebase fakes; cannot access production Firebase. |
 | `AGENTS.md` | Project-specific instructions for future Codex work. |
 
@@ -38,7 +40,7 @@ Virtual environments, caches, Git internals, ignored `test-artifacts`, generated
 
 - `GET /`: health message and scoring version; does not serve frontend files.
 - `GET /profile`, `POST /username` (JSON `username`): require a Firebase Google ID token in the `Authorization: Bearer` header. UID comes exclusively from verified claims. Responses expose only authentication status and registered username, with `Cache-Control: no-store`. Registration returns 400 for invalid/reserved names, 409 for conflicts/permanent-name changes, 503 for transaction failure. Profile/authentication failure returns 401. CORS permits these requests only from the existing allowed origins.
-- `GET /leaderboard?duration=60&period=weekly`: public top-10 names/scores plus duration, period, week and version. Period accepts `weekly`/`all_time`; duration accepts 60/120/300/600. Invalid selection returns 400; database/config failure returns 503. Thirty-second success cache, fifteen-second failure cache; request coalescing avoids duplicate queries. Weekly cache keys change at Monday 00:00 Johannesburg.
+- `GET /leaderboard?duration=60&period=weekly`: public top-10 names/scores plus duration, period, week and version. Period accepts `weekly`/`all_time`; duration accepts 60/120/300/600. Invalid selection returns 400; database/config failure returns 503. Per-IP/process HTTP limits return 429 before database work. Thirty-second success cache, fifteen-second failure cache; request coalescing avoids duplicate queries. Weekly cache keys change at Monday 00:00 Johannesburg.
 - WebSocket `/ws`: accepts JSON objects with a `type` discriminator only from explicitly allowed origins. Each connection gets a random player ID; no browser UID/nickname assertion grants authority. One socket may occupy one room at a time.
 
 | Client message | Fields besides `type` | Response/broadcast |
@@ -52,7 +54,7 @@ Virtual environments, caches, Git internals, ignored `test-artifacts`, generated
 | `play_again` | `room_code` | Host-only after completion; `returned_to_lobby` retains current members and room, clears round state. |
 | `leave_room` | `room_code` | Membership-bound departure; `player_left` to remaining players. Frontend Back closes its socket. |
 
-All room/host actions check the socket's actual membership and host player ID. Client `submit_score` is unsupported. Errors are private `error` messages with a request_type; token verification failures use sanitized status messages. Repeated starts/replay cannot replace an active round. Malformed payloads are rejected without terminating valid room state. Limits include socket/room/round counts, message size/rate, idle and send timeouts.
+All room/host actions check the socket's actual membership and host player ID. Client `submit_score` is unsupported. Errors are private `error` messages with a request_type; token verification failures use sanitized status messages. Repeated starts/replay cannot replace an active round. Malformed payloads are rejected without terminating valid room state. Separate configurable limits protect connection attempts, room/identity/host controls, HTTP endpoints and protocol errors. Valid answers have no message-rate quota. Byte-size, concurrent socket/room/round caps, unjoined/idle timeouts and unused lobby/results expiration remain bounded. See `docs/SECURITY.md` for all defaults and trusted-proxy requirements.
 
 `rooms` maps random six-character codes to host ID, players, duration, state (`lobby`, `playing`, `results`), round and deadline task. Players contain server ID, nickname, socket, verified identity/expiry, membership and send lock. A round has UUID, monotonic start/deadline, scheduled wall timestamps, private shared questions, frozen participant identities/eligibility and per-player score/next/issued counters. Reservation/profile reads happen before room admission or round snapshots. Round start rechecks membership and identity after asynchronous validation; answer mutations still validate and update without an intervening await. Sends are serialized per socket. `round_tasks` tracks deadlines even if every player leaves; shutdown cancels them.
 
@@ -74,7 +76,7 @@ Authentication is optional. The Admin SDK checks Google provider, project/signat
 
 Firestore data lives in `rounds/{round_id}` and `boards/{version_duration_week-or-all}/entries/{sha256(uid)}`. A single idempotent transaction writes the completion marker, embedded authenticated results and best-score improvements. It reads all documents before writing, so concurrent retries don't duplicate results. Completed guest rounds retain metadata without guest names or email/token/key fields.
 
-Permanent usernames use `profiles/{sha256(uid)}` (username, normalized_username, created_at) and `usernames/{lowercase_username}` (profile_id). A five-attempt Firestore transaction reads both records before creating either; one profile per UID and one claim per normalized name prevent both duplicate names and multiple names for an account. Names use 3–20 ASCII letters/numbers/underscores; admin/administrator/moderator/system/support are reserved case-insensitively. Retrying the same normalized name returns the original spelling. Different-name attempts cannot mutate the existing profile. Client Firestore access remains denied. No new composite index is required for direct profile/claim reads. Guest/unregistered room entry, in-room identity changes and each new round check normalized nickname reservations server-side and fail closed on lookup failures. Entry/start also refresh authenticated profiles. One point read is added per guest reservation check and per authenticated profile refresh, with none per answer. Public lobby `display_name` and result `display_names` keep guest identities prefixed and round snapshots stable; score keys remain compatible when unique. Registration races do not grant guests canonical identities, and the next validation rejects a newly claimed guest name. See `docs/FIREBASE_SETUP.md` for the operator-only correction/deletion procedure.
+Permanent usernames use `profiles/{sha256(uid)}` (username, normalized_username, created_at) and `usernames/{lowercase_username}` (profile_id). A five-attempt Firestore transaction reads both records before creating either; one profile per UID and one claim per normalized name prevent both duplicate names and multiple names for an account. Names use 3–20 ASCII letters/numbers/underscores; admin/administrator/moderator/system/support are reserved case-insensitively. Retrying the same normalized name returns the original spelling. Different-name attempts cannot mutate the existing profile. Client Firestore access remains denied. No new composite index is required for direct profile/claim reads. HTTP registration is throttled per IP/process/verified UID and verified same-name retries skip a new transaction. Guest/unregistered room entry, in-room identity changes and each new round check normalized nickname reservations server-side and fail closed on lookup failures. Entry/start also refresh authenticated profiles. One point read is added per guest reservation check and per authenticated profile refresh, with none per answer. Public lobby `display_name` and result `display_names` keep guest identities prefixed and round snapshots stable; score keys remain compatible when unique. Registration races do not grant guests canonical identities, and the next validation rejects a newly claimed guest name. See `docs/FIREBASE_SETUP.md` for the operator-only correction/deletion procedure.
 
 Weekly keys identify the Monday date at UTC+02:00 (Africa/Johannesburg, no DST); the scheduled **start** chooses the week even if completion/retry crosses midnight. Duration and `arithmetic-v3` separate the current +1/−1 rankings. Boards start fresh; earlier scores are not carried over. Existing documents are not deleted or migrated, and pending older records retain their original version so they cannot enter current rankings. Top-10 query: score descending, achieved_at ascending, UID ascending; negative best scores are valid and one player's equal best keeps the earliest completion (then source round ID). The existing entries composite index still applies.
 
@@ -85,7 +87,7 @@ Weekly keys identify the Monday date at UTC+02:00 (Africa/Johannesburg, no DST);
 Run from repository root with existing dependencies, in separate terminals:
 
 ```powershell
-.\backend\venv\Scripts\python.exe -B -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --ws-max-size 16384
+.\backend\venv\Scripts\python.exe -B -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --ws-max-size 16384 --no-proxy-headers --no-access-log
 ```
 
 ```powershell
@@ -117,7 +119,7 @@ For optional browser screenshots, start both local servers above, set `PLAYWRIGH
 - Live rooms cannot survive backend restart or span workers/instances. Departed players are not reattached to active rounds; completion retains their server score but disqualifies rankings.
 - Free Render cold starts and ephemeral disk remain hosting constraints. Pending persistence can be lost on restart; committed Firestore data is durable. Database/cache outages delay or temporarily hide rankings. Reservation/profile lookup outages block room entry/new rounds; active answers remain independent of Firestore.
 - The browser timer is advisory; network transit can make it trail the server deadline. Only server-received, on-time answers count. Buffering hides per-answer latency but cannot accept late answers.
-- Server scoring prevents fabricated totals/impersonation, not automated solving or coordinated account abuse. Distributed abuse mitigation is outside this implementation.
+- Server scoring prevents fabricated totals/impersonation, not automated solving or coordinated account abuse. Distributed abuse and valid-answer flood mitigation beyond process caps remain outside these in-memory controls. Counters reset on restart and require one worker; IP mode must be configured before deployment: public Render can opt into its documented CF-Connecting-IP contract with trusted private-network callers; direct/CIDR mode otherwise ignores unverified forwarding headers. See `docs/SECURITY.md`.
 - The owner confirmed production domain `speed-demons.vercel.app` and the external Firebase/Render/Vercel configuration. Render tracks `main` with auto-deploy disabled. `vercel.json` declares static output; hosted behavior still requires post-deployment acceptance.
 - Real Google login, Render secret-file/IAM configuration, Firestore index readiness and live writes remain unverified without valid credentials and production-test approval. Automated tests must remain isolated.
 

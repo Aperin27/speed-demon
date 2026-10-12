@@ -72,4 +72,4 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="speed-demon-smoke-") as directory:
         main.firebase = LocalFirebase()
         main.outbox = ResultOutbox(str(Path(directory) / "results.sqlite3"), main.firebase)
-        uvicorn.run(main.app, host="127.0.0.1", port=8000, ws_max_size=16384)
+        uvicorn.run(main.app, host="127.0.0.1", port=8000, ws_max_size=main.security.WS_MESSAGE_BYTES, proxy_headers=False, access_log=False)

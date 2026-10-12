@@ -9,8 +9,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .firebase_service import firebase
+from .security import operational_failure
 
-logger = logging.getLogger(__name__)
 
 
 class ResultOutbox:
@@ -45,7 +45,7 @@ class ResultOutbox:
         try:
             await asyncio.to_thread(self.service.save_round, json.loads(payload))
         except Exception:
-            logger.warning("Leaderboard persistence unavailable; result retained for retry")
+            operational_failure("leaderboard_persistence")
             with self.connect() as connection:
                 connection.execute("UPDATE pending SET attempts=?, retry_at=? WHERE round_id=?", (attempts + 1, time.time() + min(300, 2 ** min(attempts + 1, 8)), round_id))
         else:
@@ -59,7 +59,7 @@ class ResultOutbox:
             try:
                 processed = await self.process_once()
             except Exception:
-                logger.error("Result retry queue unavailable; retrying")
+                operational_failure("result_retry_queue", logging.ERROR)
                 processed = False
             if processed:
                 continue

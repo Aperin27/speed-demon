@@ -29,7 +29,7 @@
     status.classList.add("visually-hidden");
     signInButton.classList[user ? "add" : "remove"]("hidden");
     signOutButton.classList[user ? "remove" : "add"]("hidden");
-    signOutButton.textContent = user ? `${user.displayName || "Player"} · Sign Out` : "Sign Out";
+    signOutButton.textContent = user ? `Sign Out · ${user.displayName || "Player"}` : "Sign Out";
     resolveReady();
     window.dispatchEvent(new Event("auth-changed"));
   }

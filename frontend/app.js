@@ -180,7 +180,7 @@ function receiveMessage(data) {
     score = data.score;
     scoreDisplay.textContent = score;
     data.questions.forEach((question) => { questions[question.index] = question; });
-    setAnswerFeedback(`Question ${data.index + 1}: ${data.correct ? "Correct! +1 point" : "Incorrect. Keep going."}`, data.correct ? "correct" : "incorrect");
+    setAnswerFeedback(`Question ${data.index + 1}: ${data.correct ? "Correct · +1 point" : "Incorrect · No point"}`, data.correct ? "correct" : "incorrect");
     if (phase === "game") showCurrentQuestion();
   }
   if (data.type === "game_results" && data.round_id === roundId) {
@@ -241,8 +241,8 @@ function updateHostControls() {
   hostSettings.classList[isHost ? "remove" : "add"]("hidden");
   playAgainBtn.style.display = isHost ? "flex" : "none";
   playAgainBtn.disabled = false;
-  lobbyStatus.textContent = isHost ? (players.length < 2 ? "Invite another player to start." : "You're the host. Set the pace.") : "Waiting for the host to start the round.";
-  resultNote.textContent = isHost ? "Another round. Another chance." : "The host can bring everyone back for a rematch.";
+  lobbyStatus.textContent = isHost ? (players.length < 2 ? "At least two players are required." : "Select a duration to start.") : "Waiting for the host to start the round.";
+  resultNote.textContent = isHost ? "Return to the lobby for the next round." : "Waiting for the host to return to the lobby.";
 }
 
 function renderScores(scores) {
@@ -300,7 +300,7 @@ function tickClock() {
       scoreDisplay.textContent = 0;
       document.getElementById("game-room-code").textContent = roomCode;
       timeProgress.max = gameDuration;
-      setAnswerFeedback("Go! One point per correct answer.");
+      setAnswerFeedback("One point per correct answer.");
       showScreen(gameScreen);
       showCurrentQuestion();
       answerInput.value = "";
@@ -408,7 +408,7 @@ async function loadLeaderboard() {
       row.appendChild(points);
       leaderboardList.appendChild(row);
     });
-    leaderboardStatus.textContent = data.entries.length ? (data.week ? `Week starting ${data.week} · Johannesburg` : "All-Time · Best scores") : "No ranked rounds yet. Be the first.";
+    leaderboardStatus.textContent = data.entries.length ? (data.week ? `Week starting ${data.week} · Johannesburg` : "All-Time · Best scores") : "No ranked rounds recorded for this duration.";
   } catch {
     if (leaderboardRequest === request) leaderboardStatus.textContent = "Rankings unavailable. Try Refresh in a moment; you can still play.";
   } finally { clearTimeout(timeout); }

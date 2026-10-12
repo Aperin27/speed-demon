@@ -3,7 +3,7 @@
 Play at [speed-demons.vercel.app](https://speed-demons.vercel.app/).
 The owner has confirmed this production domain and the existing Firebase, Render and Vercel configuration. Live Firebase connectivity and authenticated persistence still require post-deployment verification.
 
-Race friends through arithmetic questions in 60, 120, 300 or 600-second rounds. Guests can create, join and play. Optional Google sign-in qualifies completed rounds for duration-specific Weekly and All-Time top-10 rankings. One point per correct answer; wrong answers consume their question. Scores and deadlines are enforced by the server.
+Race friends through arithmetic questions in 60, 120, 300 or 600-second rounds. Guests can create, join and play with unreserved nicknames, displayed as Guest · Nickname. Backend Firestore access is required to verify room-entry nickname reservations. Ranked play requires verified Google sign-in and a permanent registered username before the round starts. Correct answers earn +1; incorrect answers lose 1; negative scores are allowed. Scores and deadlines are enforced by the server. Weekly and All-Time top-10 boards use the new `arithmetic-v3` scoring version and start fresh without carrying over earlier scores.
 
 The Render free service may need about 30 seconds to wake. Rooms live in one process; a restart interrupts active games.
 

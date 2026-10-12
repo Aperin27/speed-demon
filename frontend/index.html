@@ -26,7 +26,7 @@
         <h1 id="home-title">Speed-Demons</h1>
         <div class="entry-controls">
           <div class="card entry-card">
-            <label for="nickname">Nickname</label>
+            <label id="nickname-label" for="nickname">Nickname</label>
             <div class="icon-input"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-3c0-6 16-6 16 0v3Z"/></svg></span><input id="nickname" type="text" maxlength="24" placeholder="Enter your nickname" autocomplete="nickname" /></div>
             <button id="create-room-btn" class="button-primary" type="button">Create Room <span aria-hidden="true">→</span></button>
             <p id="connection-message" class="notice hidden" role="status"></p>
@@ -39,6 +39,7 @@
             <div class="account-control"><button id="sign-in-btn" class="button-secondary" type="button" disabled><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 3h8v18h-8M3 12h13m-5-5 5 5-5 5"/></svg></span> Sign In</button><button id="sign-out-btn" class="button-secondary hidden" type="button">Sign Out</button></div>
           </div>
           <p id="auth-status" class="auth-status visually-hidden" role="status">Guest · Sign in before a round for rankings.</p>
+          <div id="username-prompt" class="username-prompt hidden"><span>A permanent username is required to rank.</span><button id="username-open-btn" class="button-quiet" type="button">Choose username</button></div>
         </div>
         <section class="card leaderboard-card" aria-labelledby="leaderboard-title">
           <div class="leaderboard-heading">
@@ -56,10 +57,10 @@
       <section id="lobby-screen" class="screen centered-screen hidden" tabindex="-1" aria-labelledby="lobby-title">
         <div class="screen-heading"><h1 id="lobby-title">Room lobby</h1><p class="muted">Share the room code. The host selects the duration.</p></div>
         <div class="card lobby-card">
-          <div class="room-banner"><div><p class="eyebrow">ROOM CODE</p><span id="room-code-display" class="room-code">—</span></div><span class="pill"><span class="status-dot" aria-hidden="true"></span> Lobby</span></div>
+          <div class="room-banner"><div><p class="eyebrow">ROOM CODE</p><div class="room-code-row"><span id="room-code-display" class="room-code">—</span><button id="copy-room-code" class="button-quiet" type="button">Copy</button></div><p id="copy-status" class="field-hint" role="status"></p></div><div class="lobby-labels"><span class="pill">Lobby</span><span id="lobby-eligibility" class="pill" role="status">Guest · Unranked</span></div></div>
           <div class="lobby-grid">
             <div class="players-box"><div class="panel-heading"><h2>In the room</h2><span id="player-count" class="pill">1 player</span></div><ul id="players-list" aria-label="Players"></ul></div>
-            <div class="round-panel"><div id="host-settings"><label for="duration">Round duration</label><select id="duration"><option value="60">1 Minute</option><option value="120">2 Minutes</option><option value="300">5 Minutes</option><option value="600">10 Minutes</option></select></div><p id="lobby-status" class="field-hint" role="status">Select a duration to start.</p><p class="round-rule">Same question sequence.<br />One point per correct answer.</p></div>
+            <div class="round-panel"><div id="host-settings"><label for="duration">Round duration</label><select id="duration"><option value="60">1 Minute</option><option value="120">2 Minutes</option><option value="300">5 Minutes</option><option value="600">10 Minutes</option></select></div><p id="lobby-status" class="field-hint" role="status">Select a duration to start.</p><p class="round-rule">Same question sequence.<br />Correct +1 · Incorrect −1.</p></div>
           </div>
           <div class="lobby-actions"><button id="back-btn" class="button-quiet" type="button">← Back</button><button id="start-btn" class="button-primary" type="button">Start Game <span aria-hidden="true">→</span></button></div>
         </div>
@@ -84,7 +85,7 @@
           <label for="answer-input" class="visually-hidden">Your answer</label>
           <div class="answer-row"><input id="answer-input" type="number" inputmode="numeric" step="1" placeholder="Your answer…" autocomplete="off" aria-describedby="answer-hint answer-feedback" /><button id="submit-btn" class="button-primary" type="button" aria-label="Submit answer"><span aria-hidden="true">→</span></button></div>
           <p id="answer-feedback" class="answer-feedback" role="status" aria-atomic="true"></p>
-          <p id="answer-hint" class="visually-hidden">Press Enter to submit. Each correct answer earns one point.</p>
+          <p id="answer-hint" class="visually-hidden">Press Enter to submit. Correct answers earn one point; incorrect answers lose one point.</p>
           <p id="ranked-status" class="visually-hidden" role="status"></p>
         </div>
       </section>
@@ -99,10 +100,25 @@
     <dl>
       <dt>Rooms</dt><dd>Enter a nickname to create a room. Share its code, or enter a friend's code and select Join Room. The host starts with at least two players.</dd>
       <dt>Duration</dt><dd>The host chooses 1, 2, 5 or 10 minutes. Questions continue until time runs out.</dd>
-      <dt>Answers &amp; scoring</dt><dd>Type a number and press Enter or the arrow. Each correct answer earns one point; an incorrect answer advances to the next question. The server confirms scores and the deadline.</dd>
+      <dt>Answers &amp; scoring</dt><dd>Type a number and press Enter or the arrow. Correct answers earn one point; incorrect answers lose one point. Scores can be negative. Each accepted answer advances to the next question. The server confirms scores and the deadline.</dd>
       <dt>Results</dt><dd>The highest score wins. Equal highest scores share the win. The host can select Play Again for a new round.</dd>
-      <dt>Rankings</dt><dd>Guest play is available. Sign in with Google before the round starts to qualify for Weekly and All-Time rankings for that duration. Stay connected and keep the same account throughout the round.</dd>
+      <dt>Rankings</dt><dd>Guest play is available. Sign in with Google and register a permanent username before the round starts to qualify for Weekly and All-Time rankings for that duration. Stay connected and keep the same account throughout the round. Rankings use the current +1/−1 scoring system.</dd>
     </dl>
+  </dialog>
+  <dialog id="username-dialog" aria-labelledby="username-title">
+    <div class="guide-heading"><h2 id="username-title">Register username</h2><button id="username-close" class="button-quiet" type="button" aria-label="Close username registration">×</button></div>
+    <label for="username-input">Username</label><input id="username-input" type="text" minlength="3" maxlength="20" pattern="[A-Za-z0-9_]{3,20}" autocomplete="off" spellcheck="false" aria-describedby="username-warning username-rules username-message" />
+    <p id="username-warning" class="field-hint username-warning">Once registered, your username cannot be changed.</p>
+    <p id="username-rules" class="field-hint">3–20 ASCII letters, numbers or underscores. Usernames are unique regardless of case.</p>
+    <label class="username-confirm"><input id="username-confirm" type="checkbox" />I understand this username is permanent.</label>
+    <button id="username-register" class="button-primary" type="button" disabled>Register permanently</button>
+    <p id="username-message" class="field-hint" role="status"></p>
+  </dialog>
+  <dialog id="username-final-dialog" aria-labelledby="username-final-title">
+    <h2 id="username-final-title">Register permanently?</h2>
+    <p class="field-hint username-warning">Once registered, your username cannot be changed.</p>
+    <button id="username-final-cancel" class="button-quiet" type="button">Go back</button>
+    <button id="username-final-register" class="button-primary" type="button">Confirm registration</button>
   </dialog>
   <script src="config.js"></script><script src="auth.js"></script><script src="app.js"></script>
 </body>

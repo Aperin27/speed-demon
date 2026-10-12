@@ -13,7 +13,7 @@ const fakeAuthSdk = `
   export class GoogleAuthProvider {}
   export function onIdTokenChanged(value, callback) { notify = callback; callback(null); }
   export async function signInWithPopup() {
-    auth.currentUser = { displayName: ${JSON.stringify(fakeAccountName)}, getIdToken: async () => 'isolated-fake-token' };
+    auth.currentUser = { displayName: ${JSON.stringify(fakeAccountName)}, getIdToken: async () => 'local-smoke-account-a' };
     notify(auth.currentUser);
   }
   export async function signOut() { auth.currentUser = null; notify(null); }
@@ -82,8 +82,9 @@ async function solve(page) {
     assert.equal(await host.locator("#guide-dialog").evaluate(dialog => dialog.open), false);
     assert.equal(await host.locator("#guide-btn").evaluate(button => button === document.activeElement), true);
     await host.getByRole("button", { name: "Sign In", exact: true }).click();
-    const signOut = host.getByRole("button", { name: `Sign Out · ${fakeAccountName}`, exact: true });
+    const signOut = host.getByRole("button", { name: /^Sign Out/ });
     await signOut.waitFor();
+    assert.equal((await host.locator("body").innerText()).includes(fakeAccountName), false, "Google display names are not public player identities");
     await host.screenshot({ path: `${artifacts}/graphite-homepage-account.png`, fullPage: true });
     await host.setViewportSize({ width: 320, height: 568 });
     await noOverflow(host);

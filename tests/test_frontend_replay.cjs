@@ -49,6 +49,11 @@ let socket;
 let currentToken = null;
 let fetchResult = { entries: [], week: "2026-10-12" };
 let fetchFailure = false;
+let profileResult = { authenticated: true, username: null };
+let registrationResult = { authenticated: true, username: "Test_Player" };
+let registrationOk = true;
+let holdRegistration = false;
+let resolveRegistration;
 const requests = [];
 const listeners = {};
 class FakeWebSocket {
@@ -68,9 +73,17 @@ const context = vm.createContext({
   clearInterval: (id) => intervals.delete(id),
   setTimeout(callback) { timeouts.set(++timerId, callback); return timerId; },
   clearTimeout: (id) => timeouts.delete(id),
-  fetch: async (url) => {
+  fetch: async (url, options = {}) => {
     requests.push(url);
     if (fetchFailure) throw Error("offline");
+    if (url.endsWith("/profile")) return { ok: true, json: async () => profileResult };
+    if (url.endsWith("/username")) {
+      if (holdRegistration) await new Promise((resolve, reject) => {
+        resolveRegistration = resolve;
+        options.signal.addEventListener("abort", () => { const error = Error("timeout"); error.name = "AbortError"; reject(error); });
+      });
+      return { ok: registrationOk, json: async () => registrationResult };
+    }
     return { ok: true, json: async () => fetchResult };
   }
 });
@@ -147,8 +160,10 @@ function enterLobby() {
   assert.equal(read("score"), 1);
   assert.equal(answer.disabled, false);
   assert.equal(focusedElement, answer);
-  receive({ type: "answer_result", round_id: "first", index: 1, correct: false, score: 1, questions: [] });
+  receive({ type: "answer_result", round_id: "first", index: 1, correct: false, score: -1, questions: [] });
   assert.match(element("answer-feedback").textContent, /Incorrect/);
+  assert.match(element("answer-feedback").textContent, /−1 point/);
+  assert.equal(read("score"), -1, "Negative server scores are displayed without clamping");
   advance(59000);
   assert.equal(element("time-progress").value, 1);
   const sentBeforeEnd = socket.sent.length;
@@ -201,5 +216,67 @@ function enterLobby() {
   assert.match(element("leaderboard-status").textContent, /Rankings unavailable/);
   assert.equal(timeouts.size, 0);
   assert.equal(read("BACKEND_WS_URL"), "ws://127.0.0.1:8000/ws");
+  fetchFailure = false;
+  await read("refreshProfile()");
+  assert.equal(element("username-prompt").classList.contains("hidden"), false);
+  element("username-open-btn").listeners.click();
+  element("username-input").value = "Test_Player";
+  element("username-input").listeners.input();
+  assert.equal(element("username-register").disabled, true, "Permanence acknowledgement required");
+  element("username-confirm").checked = true;
+  element("username-confirm").listeners.change();
+  element("username-input").value = "Admin";
+  element("username-input").listeners.input();
+  assert.equal(element("username-register").disabled, true, "Known reserved names are invalid");
+  element("username-input").value = "Test_Player";
+  element("username-input").listeners.input();
+  registrationOk = false;
+  const beforeConfirmation = requests.filter(url => url.endsWith("/username")).length;
+  element("username-register").listeners.click();
+  await flush();
+  assert.equal(requests.filter(url => url.endsWith("/username")).length, beforeConfirmation, "Opening final confirmation must not register");
+  element("username-final-cancel").listeners.click();
+  assert.equal(element("username-final-dialog").open, false);
+  assert.equal(element("username-dialog").open, true);
+  registrationResult = { detail: "Username already registered" };
+  element("username-register").listeners.click();
+  assert.equal(element("username-final-dialog").open, true);
+  assert.equal(element("username-final-title").textContent, "Register Test_Player permanently?");
+  await element("username-final-register").listeners.click();
+  assert.match(element("username-message").textContent, /already registered/);
+  assert.equal(element("username-dialog").open, true);
+  registrationOk = true;
+  registrationResult = { authenticated: true, username: "Test_Player" };
+  element("username-register").listeners.click();
+  assert.equal(element("username-final-dialog").open, true);
+  assert.equal(element("username-final-title").textContent, "Register Test_Player permanently?");
+  await element("username-final-register").listeners.click();
+  assert.equal(element("nickname").value, "Test_Player");
+  assert.equal(element("nickname").readOnly, true);
+  assert.equal(element("username-dialog").open, false);
+  await read("refreshProfile()");
+  element("username-open-btn").listeners.click();
+  element("username-confirm").checked = true;
+  element("username-confirm").listeners.change();
+  holdRegistration = true;
+  element("username-register").listeners.click();
+  const pending = element("username-final-register").listeners.click();
+  await flush();
+  assert.equal(element("username-input").disabled, true, "Confirmed name cannot change during the request");
+  await listeners["auth-changed"]();
+  resolveRegistration();
+  await pending;
+  assert.equal(element("nickname").readOnly, false, "A stale registration response cannot update a different session");
+  element("username-open-btn").listeners.click();
+  element("username-confirm").checked = true;
+  element("username-confirm").listeners.change();
+  element("username-register").listeners.click();
+  const timedOut = element("username-final-register").listeners.click();
+  await flush();
+  [...timeouts.values()].forEach(callback => callback());
+  await timedOut;
+  assert.match(element("username-message").textContent, /Retry the same username/);
+  assert.equal(element("username-register").disabled, false);
+  assert.equal(timeouts.size, 0);
   console.log("Frontend: authoritative scores, buffering, replay, stale rounds, timer, keyboard/focus, host controls, auth transport, leaderboard tabs/loading/error/XSS checks passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

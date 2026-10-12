@@ -1,13 +1,38 @@
-"""Lazy Firebase access; guests don't require credentials or the Admin SDK."""
+"""Lazy Firebase access for verified identities, nickname claims and rankings."""
 import hashlib
 import os
+import re
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "speed-demon-d6581")
-SCORING_VERSION = "arithmetic-v2"
+SCORING_VERSION = "arithmetic-v3"
 DURATIONS = (60, 120, 300, 600)
 JOHANNESBURG = timezone(timedelta(hours=2))
+RESERVED_USERNAMES = {"admin", "administrator", "moderator", "system", "support"}
+
+
+class UsernameError(ValueError):
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code
+
+
+def validate_username(username):
+    if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9_]{3,20}", username, re.ASCII):
+        raise UsernameError("Use 3–20 ASCII letters, numbers or underscores.", "invalid_username")
+    if username.lower() in RESERVED_USERNAMES:
+        raise UsernameError("This username is reserved.", "reserved_username")
+    return normalize_nickname(username)
+
+
+def profile_key(uid):
+    return hashlib.sha256(uid.encode()).hexdigest()
+
+
+def normalize_nickname(nickname):
+    return nickname.strip().casefold()
 
 
 def week_key(timestamp):
@@ -24,6 +49,13 @@ def public_name(value):
 
 
 class FirebaseService:
+    def nickname_reserved(self, nickname):
+        normalized = normalize_nickname(nickname)
+        if "/" in normalized or normalized in (".", ".."):
+            raise ValueError("Nickname cannot be checked as a Firestore reservation")
+        self.initialize()
+        return self._db.collection("usernames").document(normalized).get(timeout=10).exists
+
     def __init__(self):
         self._app = None
         self._db = None
@@ -52,7 +84,37 @@ class FirebaseService:
         claims = auth.verify_id_token(token, app=self.initialize(), check_revoked=True)
         if claims.get("firebase", {}).get("sign_in_provider") != "google.com":
             raise ValueError("Google sign-in required")
-        return {"uid": claims["uid"], "name": public_name(claims.get("name")), "exp": claims["exp"]}
+        return {"uid": claims["uid"], "username": self.get_username(claims["uid"]), "exp": claims["exp"]}
+
+    def get_username(self, uid):
+        self.initialize()
+        snapshot = self._db.collection("profiles").document(profile_key(uid)).get(timeout=10)
+        return snapshot.to_dict()["username"] if snapshot.exists else None
+
+    def register_username(self, uid, username):
+        normalized = validate_username(username)
+        self.initialize()
+        from firebase_admin import firestore
+        owner = profile_key(uid)
+        profile_ref = self._db.collection("profiles").document(owner)
+        claim_ref = self._db.collection("usernames").document(normalized)
+
+        @firestore.transactional
+        def claim(transaction):
+            profile = profile_ref.get(transaction=transaction)
+            if profile.exists:
+                existing = profile.to_dict()["username"]
+                if existing.lower() == normalized:
+                    return existing
+                raise UsernameError("Your username is permanent and cannot be changed.", "username_permanent")
+            reservation = claim_ref.get(transaction=transaction)
+            if reservation.exists:
+                raise UsernameError("This username is already registered.", "username_taken")
+            transaction.create(profile_ref, {"username": username, "normalized_username": normalized, "created_at": time.time()})
+            transaction.create(claim_ref, {"profile_id": owner})
+            return username
+
+        return claim(self._db.transaction(max_attempts=5))
 
     def save_round(self, record):
         self.initialize()
@@ -61,7 +123,7 @@ class FirebaseService:
         round_ref = database.collection("rounds").document(record["round_id"])
         updates = []
         for result in record["results"]:
-            player_key = hashlib.sha256(result["uid"].encode()).hexdigest()
+            player_key = profile_key(result["uid"])
             for period in ("weekly", "all_time"):
                 key = board_key(record["duration"], period, record["week"], record["scoring_version"])
                 ref = database.collection("boards").document(key).collection("entries").document(player_key)

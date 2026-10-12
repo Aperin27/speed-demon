@@ -12,6 +12,9 @@
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
   window.speedDemonAuth = {
+    setUsername(username) {
+      signOutButton.textContent = username ? `Sign Out · ${username}` : "Sign Out";
+    },
     async getToken() {
       await ready;
       if (!auth?.currentUser) return null;
@@ -25,11 +28,11 @@
     }
   };
   function changed(user) {
-    status.textContent = user ? `Google: ${user.displayName || "Player"}. Ranking requires server verification.` : "Guest · Sign in before a round for rankings.";
+    status.textContent = user ? "Signed in · Checking registered username." : "Guest · Sign in and register a username for rankings.";
     status.classList.add("visually-hidden");
     signInButton.classList[user ? "add" : "remove"]("hidden");
     signOutButton.classList[user ? "remove" : "add"]("hidden");
-    signOutButton.textContent = user ? `Sign Out · ${user.displayName || "Player"}` : "Sign Out";
+    signOutButton.textContent = "Sign Out";
     resolveReady();
     window.dispatchEvent(new Event("auth-changed"));
   }

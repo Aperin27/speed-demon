@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import types
+import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,9 +33,14 @@ class Reference:
     def document(self, name):
         return Reference(self.database, self.path + "/" + name)
 
-    def get(self, transaction):
-        assert not transaction.writes, "Firestore reads must precede all writes"
-        return Snapshot(self.database.documents.get(self.path))
+    def get(self, transaction=None, timeout=None):
+        if transaction:
+            assert not transaction.writes, "Firestore reads must precede all writes"
+        with self.database.lock:
+            value = copy.deepcopy(self.database.documents.get(self.path))
+        if transaction:
+            transaction.reads[self.path] = value
+        return Snapshot(value)
 
     def order_by(self, field, direction="ASCENDING"):
         self.database.orders.append((field, direction))
@@ -55,9 +61,9 @@ class Transaction:
     def __init__(self, database):
         self.database = database
         self.writes = []
+        self.reads = {}
 
     def create(self, reference, record):
-        assert reference.path not in self.database.documents
         self.writes.append((reference.path, copy.deepcopy(record)))
 
     def set(self, reference, record):
@@ -69,6 +75,8 @@ class FakeFirestore:
         self.documents = {}
         self.orders = []
         self.limit = None
+        self.lock = threading.RLock()
+        self.before_commit = lambda: None
 
     def collection(self, name):
         return Reference(self, name)
@@ -80,9 +88,18 @@ class FakeFirestore:
     @staticmethod
     def transactional(function):
         def run(transaction):
-            function(transaction)
-            for path, record in transaction.writes:
-                transaction.database.documents[path] = record
+            database = transaction.database
+            for _ in range(5):
+                result = function(transaction)
+                database.before_commit()
+                with database.lock:
+                    if any(database.documents.get(path) != value for path, value in transaction.reads.items()):
+                        transaction = Transaction(database)
+                        continue
+                    for path, record in transaction.writes:
+                        database.documents[path] = record
+                    return result
+            raise RuntimeError("Transaction retries exhausted")
         return run
 
 
@@ -145,10 +162,10 @@ class FirestoreTests(unittest.TestCase):
 
     def test_retry_of_old_scoring_version_cannot_enter_current_rankings(self):
         older = record("old-version", score=999)
-        older["scoring_version"] = "arithmetic-v1"
+        older["scoring_version"] = "arithmetic-v2"
         self.service.save_round(older)
         self.assertEqual(self.service.leaderboard(60, "all_time", None), [])
-        self.assertTrue(any("arithmetic-v1_60_all" in key for key in self.database.documents))
+        self.assertTrue(any("arithmetic-v2_60_all" in key for key in self.database.documents))
         self.service.save_round(record("current-version", score=2))
         self.assertEqual(self.service.leaderboard(60, "all_time", None)[0]["score"], 2)
 
@@ -159,7 +176,7 @@ class FirestoreTests(unittest.TestCase):
         sys.modules["firebase_admin"].auth = auth
         identity = self.service.verify_token("opaque-token")
         auth.verify_id_token.assert_called_once_with("opaque-token", app="fake-app", check_revoked=True)
-        self.assertEqual(identity, {"uid": "verified", "name": "Player", "exp": 1000})
+        self.assertEqual(identity, {"uid": "verified", "username": None, "exp": 1000})
         auth.verify_id_token.return_value["firebase"]["sign_in_provider"] = "password"
         with self.assertRaises(ValueError):
             self.service.verify_token("opaque-token")

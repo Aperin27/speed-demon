@@ -37,6 +37,10 @@ class Client:
 class RoundFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         main.rooms.clear()
+        self.reservations = patch.object(main.firebase, "nickname_reserved", return_value=False)
+        self.lookup = self.reservations.start()
+        self.profiles = patch.object(main.firebase, "get_username", side_effect=lambda uid: next((p["identity"].get("username") for room in main.rooms.values() for p in room["players"] if p["identity"] and p["identity"]["uid"] == uid), None))
+        self.profiles.start()
         self.saved = []
         self.enqueue = patch.object(main.outbox, "enqueue", side_effect=lambda record: self.saved.append(record))
         self.enqueue.start()
@@ -59,6 +63,8 @@ class RoundFlowTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
         await asyncio.gather(*self.tasks, *self.deadlines, return_exceptions=True)
         self.enqueue.stop()
+        self.reservations.stop()
+        self.profiles.stop()
         main.rooms.clear()
 
     async def receive(self, client, message_type):
@@ -93,8 +99,8 @@ class RoundFlowTests(unittest.IsolatedAsyncioTestCase):
         await main.finish_round(self.room)
         return (await self.broadcast("game_results"))[0]
 
-    async def login(self, client, uid):
-        identity = {"uid": uid, "name": "Verified " + uid, "exp": time.time() + 3600}
+    async def login(self, client, uid, registered=True):
+        identity = {"uid": uid, "username": ("Host" if client is self.host else "Guest") if registered else None, "exp": time.time() + 3600}
         with patch.object(main.firebase, "verify_token", return_value=identity):
             await client.send({"type": "authenticate", "id_token": "opaque-token"})
             status = await self.receive(client, "auth_status")
@@ -155,7 +161,7 @@ class RoundFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.host.send(self.answer(self.host_id, False))
         response = await self.receive(self.host, "answer_result")
         self.assertFalse(response["correct"])
-        self.assertEqual(response["score"], 0)
+        self.assertEqual(response["score"], -1)
         self.assertEqual(self.room["round"]["participants"][self.host_id]["next"], 1)
 
     async def test_host_membership_duration_repeated_start_and_active_replay(self):
@@ -343,13 +349,13 @@ class RoundFlowTests(unittest.IsolatedAsyncioTestCase):
                         if index % 32 == 0:
                             with self.assertRaisesRegex(ValueError, "Duplicate"):
                                 await main.handle_message(member, answer)
-                        self.assertEqual(participant["score"], index + 1 - (index // 4 + 1))
+                        self.assertEqual(participant["score"], index + 1 - 2 * (index // 4 + 1))
                         self.assertLess(len(state["questions"]) - participant["issued"], 32)
                     clock.monotonic.return_value = state["end"]
                     with self.assertRaisesRegex(ValueError, "outside round time"):
                         await main.handle_message(member, self.answer(self.host_id))
                 self.assertEqual(participant["next"], 640)
-                self.assertEqual(participant["score"], 480)
+                self.assertEqual(participant["score"], 320)
                 self.assertEqual(len({q["question_id"] for q in state["questions"]}), len(state["questions"]))
                 await self.finish()
                 await self.host.send({"type": "play_again", "room_code": self.code})
@@ -367,6 +373,59 @@ class RoundFlowTests(unittest.IsolatedAsyncioTestCase):
             await self.host.send({"type": "play_again", "room_code": self.code})
             await self.broadcast("returned_to_lobby")
             await asyncio.sleep(1.01)  # Don't trip the intentional connection rate limit.
+
+    async def test_username_registration_during_round_only_ranks_next_round(self):
+        status = await self.login(self.host, "uid-a", registered=False)
+        self.assertEqual(status["eligibility"], "username_required")
+        started = await self.start()
+        self.assertFalse(started[0]["ranked"])
+        with patch.object(main.firebase, "get_username", return_value="Host"):
+            await self.host.send({"type": "refresh_profile", "uid": "forged"})
+            status = await self.receive(self.host, "auth_status")
+            await self.broadcast("identity_changed")
+        self.assertEqual(status["username"], "Host")
+        self.assertFalse(status["ranked"])
+        await self.finish()
+        self.assertEqual(self.saved[-1]["results"], [])
+        await self.host.send({"type": "play_again", "room_code": self.code})
+        await self.broadcast("returned_to_lobby")
+        self.assertTrue((await self.start())[0]["ranked"])
+
+    async def test_negative_scores_duplicates_and_negative_result_winner(self):
+        await self.start()
+        wrong = self.answer(self.host_id, False)
+        await self.host.send(wrong)
+        self.assertEqual((await self.receive(self.host, "answer_result"))["score"], -1)
+        await self.host.send(wrong)
+        await self.receive(self.host, "error")
+        self.assertEqual(self.room["round"]["participants"][self.host_id]["score"], -1)
+        for _ in range(2):
+            await self.guest.send(self.answer(self.guest_id, False))
+            await self.receive(self.guest, "answer_result")
+        result = await self.finish()
+        self.assertEqual(result["scores"], {"Host": -1, "Guest": -2})
+        self.assertEqual(result["winners"], ["Host"])
+
+    async def test_registered_name_overrides_client_nickname_without_private_fields(self):
+        await self.login(self.host, "uid-a")
+        self.room["players"][0]["identity"]["username"] = "Registered_Name"
+        message = main.lobby_message(self.room, "identity_changed")
+        self.assertEqual(message["players"][0]["nickname"], "Registered_Name")
+        self.assertNotIn("uid", json.dumps(message))
+        started = await self.start()
+        self.assertTrue(started[0]["ranked"])
+        result = await self.finish()
+        self.assertIn("Registered_Name", result["scores"])
+        self.assertEqual(self.saved[-1]["results"][0]["name"], "Registered_Name")
+
+    async def test_unregistered_departed_uid_cannot_take_another_player_position(self):
+        await self.login(self.host, "unregistered-uid", registered=False)
+        await self.start()
+        await self.host.incoming.put(None)
+        await self.receive(self.guest, "player_left")
+        status = await self.login(self.guest, "unregistered-uid", registered=False)
+        self.assertFalse(status["authenticated"])
+        await self.receive(self.guest, "error")
 
 
 class LeaderboardEndpointTests(unittest.IsolatedAsyncioTestCase):

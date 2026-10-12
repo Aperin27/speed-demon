@@ -53,6 +53,7 @@ input, select {
 input::placeholder { color: #9199a0; opacity: 1; }
 input:hover, select:hover { border-color: #6e7880; }
 option { background: #181b1e; color: #f0f2f3; }
+select { color-scheme: dark; }
 input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 input::-webkit-inner-spin-button, input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 label { display: block; margin-bottom: 8px; color: #b6bdc3; font-size: .75rem; font-weight: 500; }
@@ -204,6 +205,18 @@ progress::-moz-progress-bar { background: #c0cbd4; }
 .lobby-card { padding: 30px; }
 .room-banner, .panel-heading, .lobby-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .room-code { font: 1.875rem var(--font-number); letter-spacing: .12em; color: #dce5ec; }
+.room-code, #game-room-code { text-transform: uppercase; font-variant-numeric: lining-nums tabular-nums; font-feature-settings: "lnum", "tnum"; }
+.room-code-row { display: flex; align-items: center; gap: 12px; }
+#copy-room-code { min-height: 36px; padding: 6px 10px; font-size: .7rem; }
+#copy-status { min-height: 18px; }
+.lobby-labels { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.username-prompt { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--muted); font-size: .75rem; }
+.username-prompt button { min-height: 36px; padding: 6px; font-size: .75rem; }
+.username-warning { margin: 18px 0; color: #d3dfe7; }
+#username-rules, #username-message { margin-top: 10px; }
+.username-confirm { display: flex; align-items: center; gap: 10px; margin: 20px 0; }
+.username-confirm input { width: 18px; height: 18px; min-height: 0; flex-shrink: 0; accent-color: #cbd1d5; }
+#username-register { width: 100%; }
 .pill { border: 1px solid #47535d; border-radius: 6px; padding: 4px 8px; color: var(--muted); font-size: .7rem; }
 .lobby-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 24px; margin: 28px 0; }
 .players-box { padding: 18px; border: 1px solid #323b43; border-radius: 12px; background: #090c0e; }
@@ -273,6 +286,8 @@ dd { margin: 5px 0 0; color: #afb9c1; font-size: .8rem; line-height: 1.7; }
   .answer-row button { font-size: 1.75rem; }
   .answer-feedback { font-size: .7rem; }
   .lobby-grid { grid-template-columns: 1fr; gap: 20px; }
+  .room-banner { flex-wrap: wrap; align-items: flex-start; }
+  .lobby-labels { width: 100%; justify-content: flex-start; }
   .lobby-card, .result-card, .countdown-card { padding: 24px 20px; }
   .screen-heading h1, .result-card h1 { font-size: 1.8rem; }
 }

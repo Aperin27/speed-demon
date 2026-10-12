@@ -49,6 +49,38 @@ let startsAt = 0;
 let endsAt = 0;
 let phase = "home";
 let lastToken;
+let profileGeneration = 0;
+let registrationPending = false;
+
+function applyProfile(profile) {
+  window.speedDemonAuth.setUsername?.(profile.username);
+  nicknameInput.readOnly = !!profile.username;
+  document.getElementById("nickname-label").textContent = profile.username ? "Username" : "Nickname";
+  if (profile.username) nicknameInput.value = profile.username;
+  document.getElementById("username-prompt").classList[profile.authenticated && !profile.username ? "remove" : "add"]("hidden");
+}
+
+async function refreshProfile() {
+  const generation = ++profileGeneration;
+  applyProfile({ authenticated: false, username: null });
+  let timeout;
+  try {
+    const token = await window.speedDemonAuth.getToken();
+    if (generation !== profileGeneration || !token) return;
+    const request = new AbortController();
+    timeout = setTimeout(() => request.abort(), 15000);
+    const response = await fetch(`${BACKEND_HTTP_URL}/profile`, { headers: { Authorization: `Bearer ${token}` }, signal: request.signal });
+    if (!response.ok) throw new Error("Profile unavailable");
+    const profile = await response.json();
+    if (generation === profileGeneration) applyProfile(profile);
+  } catch {
+    if (generation === profileGeneration) {
+      const status = document.getElementById("auth-status");
+      status.textContent = "Username verification unavailable. Guest play remains available.";
+      status.classList.remove("visually-hidden");
+    }
+  } finally { clearTimeout(timeout); }
+}
 
 function showScreen(screen) {
   [homeScreen, lobbyScreen, countdownScreen, gameScreen, resultScreen].forEach((element) => element.classList.add("hidden"));
@@ -146,12 +178,14 @@ function connectWebSocket(request) {
 function receiveMessage(data) {
   if (data.type === "joined") playerId = data.player_id;
   if (["room_created", "player_joined", "returned_to_lobby", "player_left", "identity_changed"].includes(data.type)) {
+    if (roomCode !== data.room_code) document.getElementById("copy-status").textContent = "";
     roomCode = data.room_code;
     players = data.players;
     host = data.host;
     roomCodeDisplay.textContent = roomCode;
     updatePlayersList();
     updateHostControls();
+    updateEligibility();
     if (["room_created", "player_joined", "returned_to_lobby"].includes(data.type)) {
       resetRound();
       phase = "lobby";
@@ -160,8 +194,8 @@ function receiveMessage(data) {
     }
   }
   if (data.type === "auth_status") {
-    notice(data.message || (data.authenticated ? `Google identity verified: ${data.name}. Sign in before the start to rank.` : "Playing as a guest. Guest rounds are not ranked."));
-    if (data.round_id === roundId && data.ranked === false) rankedStatus.textContent = "Guest round · This round does not qualify for rankings.";
+    if (data.message) notice(data.message);
+    if (data.round_id === roundId && data.ranked === false) rankedStatus.textContent = "Unranked round · This round does not qualify for rankings.";
   }
   if (data.type === "game_started") {
     resetRound();
@@ -171,7 +205,7 @@ function receiveMessage(data) {
     startsAt = performance.now() + (data.start_at - data.server_time) * 1000;
     endsAt = performance.now() + (data.end_at - data.server_time) * 1000;
     phase = "countdown";
-    rankedStatus.textContent = data.ranked ? "Ranked round · Complete without disconnecting or changing accounts." : "Guest round · Sign in before the next round to rank.";
+    rankedStatus.textContent = data.ranked ? "Ranked round · Complete without disconnecting or changing accounts." : "Unranked round · Sign in and register a username before the next round to rank.";
     showScreen(countdownScreen);
     tickClock();
     timerInterval = setInterval(tickClock, 100);
@@ -180,15 +214,16 @@ function receiveMessage(data) {
     score = data.score;
     scoreDisplay.textContent = score;
     data.questions.forEach((question) => { questions[question.index] = question; });
-    setAnswerFeedback(`Question ${data.index + 1}: ${data.correct ? "Correct · +1 point" : "Incorrect · No point"}`, data.correct ? "correct" : "incorrect");
+    setAnswerFeedback(`Question ${data.index + 1}: ${data.correct ? "Correct · +1 point" : "Incorrect · −1 point"}`, data.correct ? "correct" : "incorrect");
     if (phase === "game") showCurrentQuestion();
   }
   if (data.type === "game_results" && data.round_id === roundId) {
     clearInterval(timerInterval);
     timerInterval = null;
     phase = "results";
-    winnerText.textContent = data.winners.length > 1 ? `Tie: ${data.winners.join(", ")}` : `Winner: ${data.winners[0]}`;
-    renderScores(data.scores);
+    const winners = data.winners.map((name) => data.display_names?.[name] || name);
+    winnerText.textContent = winners.length > 1 ? `Tie: ${winners.join(", ")}` : `Winner: ${winners[0]}`;
+    renderScores(data.scores, data.display_names);
     updateHostControls();
     if (data.persistence === "failed") notice("Scores are final, but saving this round failed.");
     else if (data.ranked_players.length) notice("Eligible scores are queued for rankings. Refresh after a few seconds; database outages may delay updates.");
@@ -225,13 +260,18 @@ function updatePlayersList() {
   playersList.innerHTML = "";
   playerCount.textContent = `${players.length} ${players.length === 1 ? "player" : "players"}`;
   players.forEach((player) => {
-    const row = createPlayerRow(player.nickname);
+    const row = createPlayerRow(player.display_name || player.nickname);
     const role = document.createElement("span");
     role.className = "player-role";
-    role.textContent = `${player.player_id === host ? "HOST" : "PLAYER"}${player.authenticated ? " · GOOGLE" : " · GUEST"}`;
+    role.textContent = `${player.player_id === host ? "HOST" : "PLAYER"}${player.registered ? " · REGISTERED" : player.authenticated ? " · UNRANKED" : " · GUEST"}`;
     row.appendChild(role);
     playersList.appendChild(row);
   });
+}
+
+function updateEligibility() {
+  const player = players.find((member) => member.player_id === playerId);
+  document.getElementById("lobby-eligibility").textContent = { ranked: "Ranked", username_required: "Username required" }[player?.eligibility] || "Guest · Unranked";
 }
 
 function updateHostControls() {
@@ -245,10 +285,10 @@ function updateHostControls() {
   resultNote.textContent = isHost ? "Return to the lobby for the next round." : "Waiting for the host to return to the lobby.";
 }
 
-function renderScores(scores) {
+function renderScores(scores, displayNames = {}) {
   resultsList.innerHTML = "";
   Object.entries(scores).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).forEach(([name, points]) => {
-    const row = createPlayerRow(name);
+    const row = createPlayerRow(displayNames[name] || name);
     const value = document.createElement("span");
     value.className = "result-points";
     value.textContent = `${points} pts`;
@@ -300,7 +340,7 @@ function tickClock() {
       scoreDisplay.textContent = 0;
       document.getElementById("game-room-code").textContent = roomCode;
       timeProgress.max = gameDuration;
-      setAnswerFeedback("One point per correct answer.");
+      setAnswerFeedback("Correct +1 · Incorrect −1.");
       showScreen(gameScreen);
       showCurrentQuestion();
       answerInput.value = "";
@@ -340,7 +380,7 @@ function endGame() {
   submitBtn.disabled = true;
   playAgainBtn.style.display = "none";
   winnerText.textContent = "Waiting for server-confirmed results…";
-  renderScores({ [nickname]: score });
+  renderScores({ [nickname]: score }, { [nickname]: players.find((player) => player.player_id === playerId)?.display_name || nickname });
   showScreen(resultScreen);
 }
 
@@ -376,7 +416,14 @@ playAgainBtn.addEventListener("click", () => {
   playAgainBtn.disabled = true;
   send({ type: "play_again", room_code: roomCode });
 });
-window.addEventListener("auth-changed", () => syncAuthentication());
+window.addEventListener("auth-changed", () => {
+  if (usernameFinalDialog.open) usernameFinalDialog.close();
+  if (usernameDialog.open) usernameDialog.close();
+  usernameConfirm.checked = false;
+  updateUsernameButton();
+  refreshProfile();
+  return syncAuthentication();
+});
 
 const leaderboardDuration = document.getElementById("leaderboard-duration");
 const leaderboardStatus = document.getElementById("leaderboard-status");
@@ -440,3 +487,71 @@ loadLeaderboard();
 const guideDialog = document.getElementById("guide-dialog");
 document.getElementById("guide-btn").addEventListener("click", () => guideDialog.showModal());
 document.getElementById("guide-close").addEventListener("click", () => guideDialog.close());
+
+const usernameDialog = document.getElementById("username-dialog");
+const usernameInput = document.getElementById("username-input");
+const usernameConfirm = document.getElementById("username-confirm");
+const usernameRegister = document.getElementById("username-register");
+const usernameMessage = document.getElementById("username-message");
+const usernameFinalDialog = document.getElementById("username-final-dialog");
+let usernameChoice = null;
+document.getElementById("username-final-cancel").addEventListener("click", () => usernameFinalDialog.close());
+document.getElementById("username-open-btn").addEventListener("click", () => {
+  usernameConfirm.checked = false;
+  usernameMessage.textContent = "";
+  updateUsernameButton();
+  usernameDialog.showModal();
+  usernameInput.focus();
+});
+document.getElementById("username-close").addEventListener("click", () => usernameDialog.close());
+function updateUsernameButton() {
+  usernameInput.disabled = registrationPending;
+  usernameConfirm.disabled = registrationPending;
+  const valid = /^[A-Za-z0-9_]{3,20}$/.test(usernameInput.value) && !["admin", "administrator", "moderator", "system", "support"].includes(usernameInput.value.toLowerCase());
+  usernameRegister.disabled = registrationPending || !usernameConfirm.checked || !valid;
+}
+usernameInput.addEventListener("input", updateUsernameButton);
+usernameConfirm.addEventListener("change", updateUsernameButton);
+usernameRegister.addEventListener("click", () => {
+  if (usernameRegister.disabled) return;
+  usernameChoice = { generation: profileGeneration, username: usernameInput.value };
+  document.getElementById("username-final-title").textContent = `Register ${usernameChoice.username} permanently?`;
+  usernameFinalDialog.showModal();
+});
+document.getElementById("username-final-register").addEventListener("click", async () => {
+  if (registrationPending || usernameRegister.disabled || !usernameChoice || usernameChoice.generation !== profileGeneration || usernameChoice.username !== usernameInput.value) return;
+  const { generation, username: chosenUsername } = usernameChoice;
+  usernameFinalDialog.close();
+  registrationPending = true;
+  updateUsernameButton();
+  usernameMessage.textContent = "Registering…";
+  let timeout;
+  try {
+    const token = await window.speedDemonAuth.getToken();
+    if (!token || generation !== profileGeneration) throw new Error("Sign in again before registering.");
+    const request = new AbortController();
+    timeout = setTimeout(() => request.abort(), 15000);
+    const response = await fetch(`${BACKEND_HTTP_URL}/username`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ username: chosenUsername }), signal: request.signal });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Registration unavailable. Retry the same username.");
+    if (generation !== profileGeneration) return;
+    applyProfile(data);
+    if (socket?.readyState === WebSocket.OPEN) send({ type: "refresh_profile" });
+    usernameDialog.close();
+  } catch (error) {
+    usernameMessage.textContent = error.name === "AbortError" ? "Response timed out. Retry the same username; your claim may have completed." : error.message;
+  } finally {
+    registrationPending = false;
+    clearTimeout(timeout);
+    updateUsernameButton();
+  }
+});
+document.getElementById("copy-room-code").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(roomCode);
+    document.getElementById("copy-status").textContent = "Room code copied.";
+  } catch {
+    document.getElementById("copy-status").textContent = "Copy unavailable. Select the room code to copy it.";
+  }
+});
+refreshProfile();

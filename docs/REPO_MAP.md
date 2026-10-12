@@ -2,100 +2,113 @@
 
 ## Purpose and stack
 
-Speed Demon is a multiplayer arithmetic race: players create or join a room, the host chooses a round duration, and players answer a shared question sequence before comparing scores. The intended screen flow is home -> lobby -> countdown -> game -> results -> lobby; see the implementation concerns below for current limitations.
+Speed Demon is a multiplayer arithmetic race: players create or join a room, the host chooses a duration, and everyone answers the same buffered prompt sequence before comparing server-verified scores. Screen flow: home -> lobby -> countdown -> game -> results -> lobby.
 
-- Backend: Python, FastAPI, Uvicorn, and WebSockets; declared in `backend/requirements.txt` without version pins. Python's standard library supplies random question generation and JSON serialization.
-- Frontend: static HTML, CSS, and browser JavaScript, with no framework, bundler, npm manifest, or external client library.
-- No database, authentication service, or persistent storage. Room state lives in one backend process.
+- Backend: Python, FastAPI, Uvicorn, WebSockets and firebase-admin, pinned in `backend/requirements.txt`. Rooms and live rounds occupy one process; Google Authentication and Firestore support optional persistent rankings.
+- Frontend: static HTML/CSS and plain browser JavaScript. No framework, npm manifest or bundler; only Firebase app/auth modules are dynamically imported from the official CDN, pinned to 13.0.0.
+- Persistence: completed Firestore round records and per-UID best entries, with a local SQLite retry outbox. Guests do not require Firebase availability.
 
 ## Entry points and important files
 
 | Path | Responsibility |
 | --- | --- |
-| `backend/main.py` | FastAPI `app`, room storage, question generation, WebSocket dispatch, score aggregation, and disconnect handling. All backend logic is here. |
-| `backend/requirements.txt` | Declares `fastapi`, `uvicorn`, and `websockets`. |
-| `backend/render.yaml` | Empty file; currently supplies no deployment configuration. |
-| `frontend/index.html` | Five screen containers, inputs, buttons, and DOM IDs; loads `style.css` and then `app.js` at the end of the body. |
-| `frontend/app.js` | DOM bindings, socket connection and event dispatch, screen transitions, host controls, countdown, answer checking, timer, and results. One classic script, not separate imported modules. |
-| `frontend/style.css` | Shared layout and controls, screen/card styling, and `.hidden` visibility class. |
-| `README.md` | Public game link and a note about backend cold-start delay; no local setup or test instructions. |
+| `backend/main.py` | FastAPI app, origin/member/host checks, socket identity, room lifecycle, private question generation, authoritative deadlines/scoring and leaderboard HTTP cache. |
+| `backend/firebase_service.py` | Lazy Admin initialization, verified Google ID-token identities, week/version/duration board keys, idempotent round transactions and indexed top-10 queries. |
+| `backend/persistence.py` | SQLite outbox, capped exponential retries, background persistence worker. |
+| `backend/requirements.txt`, `backend/.env.example` | Pinned dependencies and non-secret configuration example. |
+| `backend/render.yaml` | Existing empty file; deployment settings must be applied to the existing Render service manually. |
+| `frontend/index.html` | Header/footer, five screen sections, optional Google account controls and always-visible leaderboard panel. Preserves labels, live feedback, skip link and named DOM bindings. |
+| `frontend/app.js` | Socket protocol, connection cleanup, ID-based host controls, focus/screens, prompt buffer, advisory timer, server acknowledgement scores, results/replay and leaderboard states. |
+| `frontend/auth.js` | Optional Firebase SDK loading, popup Google login, logout and ID-token change notifications. Guest play survives SDK/config failure. |
+| `frontend/config.js` | Public Firebase web configuration; localhost selects local backend, other hosts select existing Render service. No Admin secrets. |
+| `frontend/style.css` | Existing navy/blue/purple responsive design, cards/controls, focus/reduced-motion/hidden rules; account and leaderboard styling. |
+| `firestore.rules`, `firestore.indexes.json`, `firebase.json` | Deny-all client rules, composite index and manual Firebase CLI deployment definitions. |
+| `vercel.json` | Static `frontend` output with no install/build command; no domain ownership metadata. |
+| `README.md`, `docs/FIREBASE_SETUP.md` | Public link, local commands, exact Firebase/Render/Vercel configuration, deploy procedure, cloud acceptance and free-tier limits. |
+| `tests/test_round_flow.py`, `tests/test_persistence.py` | Isolated handler/security, Firebase adapter/transaction, caching, rollover and outbox tests. |
+| `tests/test_frontend_replay.cjs`, `tests/test_frontend_auth.cjs` | Real client and auth script tests with DOM/socket/timer/SDK doubles. |
+| `tests/local_server.py` | Real local Uvicorn server backed by in-memory Firebase fakes; cannot access production Firebase. |
 | `AGENTS.md` | Project-specific instructions for future Codex work. |
 
-Virtual environments, caches, Git internals, generated files, and the Windows shortcut are not architecture sources.
+Virtual environments, caches, Git internals, ignored `test-artifacts`, generated files and the Windows shortcut are not architecture sources.
 
 ## Backend interface and state
 
-`backend/main.py` defines two application endpoints:
+- `GET /`: health message and scoring version; does not serve frontend files.
+- `GET /leaderboard?duration=60&period=weekly`: public top-10 names/scores plus duration, period, week and version. Period accepts `weekly`/`all_time`; duration accepts 60/120/300/600. Invalid selection returns 400; database/config failure returns 503. Thirty-second success cache, fifteen-second failure cache; request coalescing avoids duplicate queries. Weekly cache keys change at Monday 00:00 Johannesburg.
+- WebSocket `/ws`: accepts JSON objects with a `type` discriminator only from explicitly allowed origins. Each connection gets a random player ID; no browser UID/nickname assertion grants authority. One socket may occupy one room at a time.
 
-- `GET /`: returns a JSON server-running message; it does not serve the frontend.
-- WebSocket `/ws`: accepts JSON text messages with a `type` field. `websocket_endpoint()` dispatches them; `send_to_room()` broadcasts JSON to connected players and removes players whose sends fail.
-
-| Client message | Fields besides `type` | Server response/broadcast |
+| Client message | Fields besides `type` | Response/broadcast |
 | --- | --- | --- |
-| `create_room` | `nickname` | `room_created`: `room_code`, `players`, `host` |
-| `join_room` | `room_code`, `nickname` | `player_joined`: `room_code`, `players`, `host`; `error` for missing room |
-| `start_game` | `room_code`, `duration` | `game_started`: `duration`, `questions`; host nickname check |
-| `submit_score` | `room_code`, `nickname`, `score` | `game_results`: `scores`, `winner`, when score count equals current player count |
-| `play_again` | `room_code` | `returned_to_lobby`: `room_code`, `players`, `host`; only the room's host socket can replay |
+| `authenticate` | `id_token`: Firebase ID token or null for guest/logout | Private `auth_status`: authenticated/name/message. Room `identity_changed` updates public player status. UID/token never broadcast. |
+| `create_room` | `nickname` | Private `joined` with player_id, then `room_created` with room_code/players/host. |
+| `join_room` | `room_code`, `nickname` | Private `joined`, then room `player_joined`; unique nickname/UID, lobby-only, eight-player maximum. |
+| `start_game` | `room_code`, `duration` | Host-only, lobby-only, at least two players. Private `game_started`: round_id, duration, server_time, start_at, end_at, prompt buffer, own ranked eligibility. |
+| `answer` | `room_code`, `round_id`, `question_id`, `index`, `answer` | Private `answer_result`: round_id/index, correctness, authoritative total score and one new buffered prompt. Invalid, duplicate, out-of-order, unissued, stale, countdown or late answers rejected. |
+| `play_again` | `room_code` | Host-only after completion; `returned_to_lobby` retains current members and room, clears round state. |
+| `leave_room` | `room_code` | Membership-bound departure; `player_left` to remaining players. Frontend Back closes its socket. |
 
-Other outbound messages are `player_left` (`players`, `host`) and `error` (`message`).
+All room/host actions check the socket's actual membership and host player ID. Client `submit_score` is unsupported. Errors are private `error` messages with a request_type; token verification failures use sanitized status messages. Repeated starts/replay cannot replace an active round. Malformed payloads are rejected without terminating valid room state. Limits include socket/room/round counts, message size/rate, idle and send timeouts.
 
-The global `rooms` dictionary is keyed by unique four-character uppercase/digit codes. Each room contains `host`, `players` (nickname/socket pairs), `scores` (nickname keys), `started`, `duration`, and `questions`. Each socket handler remembers `current_room` and `current_nickname`. Disconnect cleanup removes players by nickname and deletes an empty room; it does not transfer host ownership.
+`rooms` maps random six-character codes to host ID, players, duration, state (`lobby`, `playing`, `results`), round and deadline task. Players contain server ID, nickname, socket, verified identity/expiry, membership and send lock. A round has UUID, monotonic start/deadline, scheduled wall timestamps, private shared questions, frozen participant identities/eligibility and per-player score/next/issued counters. Mutations validate and update without an intervening await; sends are serialized per socket. `round_tasks` tracks deadlines even if every player leaves; shutdown cancels them.
 
-Starting a round sets `started`, duration, and questions, and clears scores. Score submissions accumulate independently of their order. Only `play_again` performs the replay reset: it clears `started`, scores, and questions while preserving room code, host, players, and selected duration. Replay checks the socket's current room and the first host-named player's socket. Unrecognized message types are ignored.
+Round countdown lasts three seconds. Server monotonic time governs accepted answers and an independent task ends the round without score submissions. Each correct answer earns one point; each valid wrong numeric answer consumes its question. Prompts contain no answer key; question IDs/indexes bind submissions to the issued sequence. The initial lookahead is 32 questions, replenished by acknowledgements, with a shared sequence generated further as required. Results include all original participants and explicit ties, even if someone left; departures disqualify that person's ranking and transfer host ownership. Empty rooms are removed, but their deadline still records completion.
+
+Authentication is optional. The Admin SDK checks Google provider, project/signature/expiry and revocation. Start freezes eligible UIDs/display names, including expiry at the scheduled start. Late sign-in never adds eligibility; logout/account switch/token failure/disconnect can revoke it. Duplicate UIDs are rejected across current room members and original active-round participants. Replay takes a new snapshot.
 
 ## Frontend interaction and game data flow
 
-All client behavior is in `frontend/app.js`:
+1. DOM IDs, CSS `.hidden` and `showScreen` preserve the redesigned home/lobby/countdown/game/results flow and focus transitions. Responsive controls, live feedback and reduced motion remain.
+2. `enterRoom` validates nickname/code, closes prior sockets and creates one connection. After opening, it sends an optional ID token followed by create/join. `joined` sets the server player ID; room events render player rows and ID-based host controls. Back closes the socket. Errors/disconnects are shown as notices; reconnect is a fresh lobby join, never an active-round restoration.
+3. `auth.js` loads only Firebase app/auth modules. `onIdTokenChanged` dispatches `auth-changed`; the app transports refreshed tokens privately. A missing/broken SDK leaves guest play available. Server `auth_status` distinguishes a Google browser session from verified leaderboard identity.
+4. `game_started` resets local state, receives prompts without answers and computes advisory monotonic display times from server timestamps. The server ends the round independently. The client counts down, focuses answer input and renders progress/urgent time.
+5. Enter (excluding key repeat) and Submit validate numeric input and send question/round IDs, index and answer. The client immediately advances through the buffer; it awards no points. `answer_result` updates score/feedback and adds prompts. Empty buffer temporarily disables controls; an acknowledgement restores focus. Stale acknowledgements/results from another round are ignored. An answer rejection stops local answering and waits for final server results.
+6. Local display expiry disables input and shows waiting results; it sends no score. `game_results` renders server scores/ties and persistence status. Replay cancels the display timer and returns both clients to a fresh lobby. Auth/leave status updates do not restart a round.
+7. Leaderboard tabs, native duration select and Refresh issue HTTP requests without polling. Loading/empty/error states are explicit, stale requests are aborted/ignored and names are rendered as text nodes. Arrow/Home/End keys switch tabs with proper focus/ARIA selection. The list uses server tie ordering.
 
-1. DOM constants bind to IDs in `frontend/index.html`. `showScreen()` toggles `.hidden` from `frontend/style.css`. UI changes must keep these bindings aligned.
-2. `createRoom()` / `joinRoom()` validate basic input, call `connectWebSocket()`, then send their request on socket open. Lobby events update `roomCode`, `players`, and `host`; `updatePlayersList()` and `updateHostControls()` render them.
-3. `requestStartGame()` sends the selected duration (HTML offers 60, 120, 300, or 600 seconds). `generate_questions()` creates 200 questions using operands 1-12 and addition, subtraction, or multiplication; answers are included in the broadcast.
-4. `game_started` loads the shared sequence and starts a browser-local three-second countdown. `startGame()` resets local score/index and starts a one-second interval. `showCurrentQuestion()` supplies the displayed question and expected answer.
-5. `submitAnswer()` compares `Number(answerInput.value)` with the supplied answer, awards one point for a match, and advances even on a wrong answer. Button click and Enter share this function. Exhausting questions displays "No more questions" until time expires.
-6. `endGame()` submits the browser's final score and displays a waiting screen. The backend chooses the maximum submitted score; `renderResults()` displays the broadcast. Equal scores select the first maximum in dictionary order, without an explicit tie presentation.
-7. Play Again sends `play_again`. `returned_to_lobby` cancels countdown/game timers, clears local questions and score state, refreshes room membership and host controls, and shows the lobby on both clients. The next start initializes a fresh round.
+## Persistence and rankings
 
-State is mutable script-level variables: socket/identity/lobby data, question sequence/index, score, expected answer, duration/time remaining, and timer handle. There is no centralized store, server-controlled deadline, or server-side answer checking.
+Firestore data lives in `rounds/{round_id}` and `boards/{version_duration_week-or-all}/entries/{sha256(uid)}`. A single idempotent transaction writes the completion marker, embedded authenticated results and best-score improvements. It reads all documents before writing, so concurrent retries don't duplicate results. Completed guest rounds retain metadata without guest names or email/token/key fields.
+
+Weekly keys identify the Monday date at UTC+02:00 (Africa/Johannesburg, no DST); the scheduled **start** chooses the week even if completion/retry crosses midnight. Historical boards remain without a reset job. Duration and `arithmetic-v2` separate incompatible rankings. Top-10 query: score descending, achieved_at ascending, UID ascending; one player's equal best keeps the earliest completion (then source round ID).
+
+`ResultOutbox` enqueues records in local SQLite and retries Firestore failures with exponential backoff capped at five minutes. Firebase access is offloaded to threads, so gameplay remains independent. Successfully committed records survive restarts in Firestore. The queue survives only while local disk survives; free Render ephemeral storage can lose pending records during restart/redeploy. Queue/disk errors surface separately from game results. Secrets are supplied by environment/file only; client Firestore rules remain deny-all.
 
 ## Running and verification
 
-With Python and the declared backend dependencies already available, run from the repository root in PowerShell, in separate terminals:
+Run from repository root with existing dependencies, in separate terminals:
 
 ```powershell
-Set-Location backend
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+.\backend\venv\Scripts\python.exe -B -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --ws-max-size 16384
 ```
 
 ```powershell
-Set-Location frontend
-python -m http.server 5500 --bind 127.0.0.1
+python -B -m http.server 5500 --bind 127.0.0.1 --directory frontend
 ```
 
-Open `http://127.0.0.1:5500/`. These commands are derived from the source layout, not a checked-in start script, and were not run during documentation creation. An existing `backend/venv` is local environment material, not a reproducible setup specification.
+Open `http://localhost:5500`. The public config automatically chooses localhost:8000 for local pages; hosted pages use the existing `https://speed-demom.onrender.com` backend. Use one worker. To avoid production Firebase access during browser testing, run `python -B -m tests.local_server` instead of the Uvicorn command; it uses isolated fakes, rejects real tokens and removes temporary queue data on shutdown.
 
-**Connection caveat:** `BACKEND_WS_URL` in `frontend/app.js` points to `wss://speed-demom.onrender.com/ws`, so serving the frontend locally still uses that deployed backend. A fully local session requires changing it to `ws://127.0.0.1:8000/ws`. `BACKEND_HTTP_URL` points to the same deployed service but is unused. This map does not change either constant. `README.md` links to a Vercel-hosted frontend; deployment availability was not checked.
-
-Focused regression checks require the existing backend dependencies and Node.js, with no additional test packages:
+Focused commands:
 
 ```powershell
 .\backend\venv\Scripts\python.exe -B -m unittest discover -s tests -v
 node --check frontend/app.js
+node --check frontend/auth.js
+node --check frontend/config.js
 node tests/test_frontend_replay.cjs
+node tests/test_frontend_auth.cjs
+git diff --check
 ```
 
-Use `python` instead of the virtual-environment executable if the dependencies are available there. `tests/test_round_flow.py` exercises the real WebSocket handler with in-memory socket doubles: both score orders, replay and second rounds, rejected guest start/replay, duplicate-host-name replay rejection, missing rooms, and unrelated messages. `tests/test_frontend_replay.cjs` executes the real client script with DOM/socket/timer doubles to check replay messages, lobby transitions, timer cancellation, and subsequent scoring. These are automated handler/client checks, not real-network or browser tests. No lint configuration or build scripts are configured.
+Use `.venv` or `python` instead if dependencies are available there. No additional test packages are needed. Handler/Firestore/auth tests use fakes, while the real browser smoke server exercises real HTTP/WebSocket transport and UI with a fake database. Neither proves deployed Auth/IAM/index/Firestore integration. See `docs/FIREBASE_SETUP.md` for manual settings and acceptance steps.
 
-For browser verification, use two local tabs and a temporary frontend copy whose backend URLs point to localhost; discard the copy afterward and retain the deployed constants in repository source. Exercise create/join, start, answers, results, host replay, both lobbies, and a second round. Score order should be verified separately with controlled submissions. Disconnect behavior needs separate verification.
+## Known limitations and verification boundaries
 
-## Known implementation concerns
+- Live rooms cannot survive backend restart or span workers/instances. Departed players are not reattached to active rounds; completion retains their server score but disqualifies rankings.
+- Free Render cold starts and ephemeral disk remain hosting constraints. Pending persistence can be lost on restart; committed Firestore data is durable. Database/cache outages delay or temporarily hide rankings without blocking guests.
+- The browser timer is advisory; network transit can make it trail the server deadline. Only server-received, on-time answers count. Buffering hides per-answer latency but cannot accept late answers.
+- Server scoring prevents fabricated totals/impersonation, not automated solving or coordinated account abuse. Distributed abuse mitigation is outside this implementation.
+- The owner confirmed production domain `speed-demons.vercel.app` and the external Firebase/Render/Vercel configuration. Render tracks `main` with auto-deploy disabled. `vercel.json` declares static output; hosted behavior still requires post-deployment acceptance.
+- Real Google login, Render secret-file/IAM configuration, Firestore index readiness and live writes remain unverified without valid credentials and production-test approval. Automated tests must remain isolated.
 
-Remaining concerns from source inspection; these are outside the replay fix and are not a passing runtime validation report:
-
-- The client does not handle `player_left` events.
-- Nicknames are used as identity, start-game authorization, and score keys without uniqueness enforcement. Replay checks the host socket, but submitted scores and start-game target rooms remain trusted without socket-membership or value validation; clients receive answers. Duplicate/spoofed names or scores can disrupt results.
-- Rooms disappear on restart and cannot be shared across independent workers. Host departure leaves the old host name; disconnects do not re-evaluate result completion, potentially leaving players waiting.
-- Socket errors/reconnects are not handled. Repeated connections and Back do not close prior sockets; countdown/timer lifecycle is not guarded against repeated starts. The waiting-score display interpolates the nickname into `innerHTML`.
-- CORS is broadly permissive; WebSocket origin/authentication checks are absent. Dependencies are unpinned and deployment configuration is empty.
-
-Consult this map to locate code, then verify behavior in the actual source before editing. Update it when paths, endpoints, protocol, state ownership, dependencies, or startup/test procedures change.
+Consult this map for navigation, then verify details against the source. Update it when paths, endpoints, protocol, state ownership, dependencies or startup/test procedures change.

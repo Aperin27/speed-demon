@@ -6,6 +6,8 @@ fs.mkdirSync("test-artifacts", { recursive: true });
 
 async function closed(page) {
   await page.waitForFunction(() => !document.getElementById("room-loading").open);
+  assert.equal(await page.locator("#loading-cascade > span").count(), 0, "Closing removes the decorative cascade");
+  assert.equal(await page.locator(".hunting-number").count(), 0, "Closing removes all hunting targets");
 }
 
 async function layoutFits(page) {
@@ -22,6 +24,11 @@ async function layoutFits(page) {
   assert.equal(await page.locator("#room-loading").evaluate(dialog => getComputedStyle(dialog).backgroundColor), "rgba(0, 0, 0, 0)");
   assert.equal(await page.locator("#home-screen").isVisible(), true, "Homepage stays visible beneath the overlay");
   assert.equal(await page.locator("#lobby-screen").isVisible(), false);
+  const reduced = await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
+  assert.equal(await page.locator(".cascade-number").count(), reduced ? 16 : viewport.width <= 640 ? 36 : 64,
+    "Cascade density follows viewport size and the motion preference");
+  const cascadeMotion = await page.locator(".cascade-number").first().evaluate(element => getComputedStyle(element).animationName);
+  assert.equal(cascadeMotion === "none", reduced, "Reduced motion leaves the atmospheric digits static");
   await page.locator("#loading-return").scrollIntoViewIfNeeded();
   const button = await page.locator("#loading-return").boundingBox();
   assert.ok(button.y >= 0 && button.y + button.height <= viewport.height);
@@ -78,9 +85,13 @@ async function prepare(page, errors) {
     assert.deepEqual(await host.locator("#home-screen").boundingBox(), homeLayout, "Overlay does not change homepage layout");
     assert.equal(await host.locator("#loading-title").evaluate(element => element === document.activeElement), true);
     assert.equal(await host.locator(".hunting-number").count(), 5);
+    assert.equal(await host.locator(".cascade-number").count(), 64);
+    const cascadeTransform = await host.locator(".cascade-number").first().evaluate(element => getComputedStyle(element).transform);
     const initialTransform = await host.locator("#loading-hunter").evaluate(element => element.style.transform);
     await host.waitForFunction(initial => document.getElementById("loading-hunter").style.transform !== initial, initialTransform);
     await layoutFits(host);
+    assert.notEqual(await host.locator(".cascade-number").first().evaluate(element => getComputedStyle(element).transform), cascadeTransform,
+      "The decorative cascade drifts through CSS transforms");
     await host.screenshot({ path: "test-artifacts/loading-hunt-desktop.png" });
     await host.locator("#loading-scene").screenshot({ path: "test-artifacts/loading-creature.png" });
     for (const [width, height] of [[320, 568], [390, 844], [844, 390]]) {
@@ -92,6 +103,11 @@ async function prepare(page, errors) {
     assert.deepEqual(requests, [], "Hunting issues no extra HTTP requests");
     assert.ok(roomHeld, "Actual room confirmation was deliberately held by the browser fixture");
     await host.setViewportSize({ width: 1440, height: 900 });
+    await host.emulateMedia({ reducedMotion: "reduce" });
+    await host.waitForFunction(() => document.querySelectorAll(".cascade-number").length === 16);
+    assert.equal(await host.locator("#loading-hunter").getAttribute("data-action"), "still");
+    await host.emulateMedia({ reducedMotion: "no-preference" });
+    await host.waitForFunction(() => document.querySelectorAll(".cascade-number").length === 64);
     await host.evaluate(() => {
       window.finalWasEaten = false;
       const layer = document.getElementById("loading-numbers");
@@ -109,6 +125,7 @@ async function prepare(page, errors) {
     assert.equal(await host.locator("#lobby-screen").isVisible(), false);
     assert.equal(await host.locator(".hunting-number").count(), 1);
     assert.equal(await host.locator(".final-number").count(), 1);
+    assert.equal(await host.locator(".cascade-number").count(), 0, "Room confirmation clears the ambient cascade for the final bite");
     await host.waitForFunction(() => {
       const digit = document.querySelector(".final-number > span");
       return digit && Number(getComputedStyle(digit).opacity) > .95;
@@ -162,6 +179,7 @@ async function prepare(page, errors) {
     await failure.locator("#create-room-btn").click();
     await failure.locator('#room-loading[data-state="failed"]').waitFor();
     assert.equal(await failure.locator("#loading-hunter").getAttribute("data-action"), "still");
+    assert.equal(await failure.locator(".cascade-number").count(), 0, "Failure stops ambient animation");
     assert.equal(await failure.locator("#loading-retry").evaluate(element => element === document.activeElement), true);
     await failure.waitForFunction(() => Number(getComputedStyle(document.getElementById("loading-hud")).opacity) >= .99);
     await failure.screenshot({ path: "test-artifacts/loading-failure.png" });
@@ -215,6 +233,6 @@ async function prepare(page, errors) {
     await reduced.locator("#lobby-screen").waitFor({ state: "visible" });
     assert.equal(await reduced.locator("#loading-numbers").evaluate(element => element.children.length), 0);
     assert.deepEqual(errors, []);
-    console.log("Real local Edge browser: transparent fullviewport overlay, unchanged visible homepage through final red bite, delayed create/join, depth hunting, focus, host-start during finale, failure/retry/missing room/return/Escape, reduced motion, desktop/320px/390px/short-landscape layout, no extra HTTP or room requests, and no page errors passed. External Firebase SDK blocked; no production traffic.");
+    console.log("Real local Edge browser: transparent fullviewport overlay, responsive CSS cascade, live reduced-motion changes and particle cleanup, unchanged visible homepage through final red bite, delayed create/join, depth hunting, focus, host-start during finale, failure/retry/missing room/return/Escape, reduced motion, desktop/320px/390px/short-landscape layout, no extra HTTP or room requests, and no page errors passed. External Firebase SDK blocked; no production traffic.");
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

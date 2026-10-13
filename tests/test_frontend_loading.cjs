@@ -183,6 +183,7 @@ function assertCleanAnimation(session) {
   assert.equal(session.window.roomLoading.isActive(), false);
   assert.equal(session.element("room-loading").open, false);
   assert.equal(session.element("loading-numbers").children.length, 0);
+  assert.equal(session.element("loading-cascade").children.length, 0, "Exiting removes the decorative cascade");
   assert.equal(session.clock.scheduled.size, 0, "Exiting removes every animation timer/frame");
   assert.equal(session.document.listeners.get("visibilitychange")?.size || 0, 0);
   assert.equal(session.window.listeners.get("resize")?.size || 0, 0);
@@ -201,6 +202,7 @@ async function testHuntingAnimation() {
   const loading = window.roomLoading;
   const dialog = element("room-loading");
   const numbers = element("loading-numbers");
+  const cascade = element("loading-cascade");
   const hunter = element("loading-hunter");
   element("create-room-btn").focus();
   let returned = 0;
@@ -209,6 +211,13 @@ async function testHuntingAnimation() {
   assert.equal(document.activeElement, element("loading-title"));
   assert.equal(dialog.dataset.state, "waiting");
   assert.equal(numbers.children.length, 5, "The hunt starts with five local numbers");
+  assert.equal(cascade.children.length, 64, "Desktop adds a dense decorative cascade without adding edible targets");
+  assert.ok(cascade.children.every((number) => /^\d$/.test(number.textContent)), "The cascade contains individual mathematical digits");
+  const originalCascade = [...cascade.children];
+  assert.ok(cascade.children.filter((number) => parseFloat(number.style["--cascade-x"]) < 30).length > cascade.children.length * .65,
+    "Most decorative digits stay along the left edge, preserving homepage readability");
+  assert.ok(new Set(cascade.children.map((number) => number.style["--cascade-scale"])).size > 2,
+    "The cascade has multiple static depth layers");
   const original = new Set(numbers.children);
   const actions = new Set();
   const scales = new Set();
@@ -223,6 +232,7 @@ async function testHuntingAnimation() {
     assert.match(hunter.querySelector(".demon-facing").style.transform, /^scaleX\(-?1\)$/, "Facing changes independently of depth");
     observedPrey.push(...numbers.children.map((number) => readTranslation(number.style.transform)));
     assert.equal(numbers.children.length, 5, "Each eaten number is replaced without DOM growth");
+    assert.deepEqual(cascade.children, originalCascade, "CSS moves the cascade without rebuilding DOM during the hunt");
     assert.ok(clock.scheduled.size <= 1, "A hunt uses a single pending animation step");
   }
   assert.ok(actions.has("scan") && actions.has("run") && actions.has("bite"), "The loop visibly scans, hunts and consumes");
@@ -238,6 +248,10 @@ async function testHuntingAnimation() {
   window.innerWidth = 320;
   window.innerHeight = 740;
   await window.dispatch("resize");
+  assert.equal(cascade.children.length, 36, "Crossing the mobile breakpoint lowers cascade density");
+  const mobileCascade = [...cascade.children];
+  await window.dispatch("resize");
+  assert.deepEqual(cascade.children, mobileCascade, "Resizing within one density band keeps existing particles");
   assert.doesNotMatch(hunter.style.transform, /NaN|Infinity/);
   for (const number of numbers.children) {
     const position = readTranslation(number.style.transform);
@@ -251,6 +265,7 @@ async function testHuntingAnimation() {
   loading.finish(() => completed++);
   assert.equal(dialog.dataset.state, "finishing");
   assert.equal(numbers.children.length, 1, "Confirmation stops replenishment and clears normal prey");
+  assert.equal(cascade.children.length, 0, "The ambient cascade clears for the final red bite");
   assert.equal(numbers.children[0].classList.contains("final-number"), true);
   assert.equal(numbers.children[0].textContent, "0");
   assert.equal(hunter.dataset.action, "alert", "The final red number triggers a stronger reaction");
@@ -280,6 +295,7 @@ async function testHuntingAnimation() {
   assert.equal(dialog.dataset.state, "failed");
   assert.equal(clock.scheduled.size, 0, "Failure stops the hunting loop");
   assert.equal(numbers.children.length, 0);
+  assert.equal(cascade.children.length, 0, "Failure clears decorative animation immediately");
   assert.equal(element("loading-retry").classList.contains("hidden"), false);
   assert.equal(document.activeElement, element("loading-retry"));
   loading.fail("Ignored duplicate", () => { throw Error("Wrong retry"); }, () => {});
@@ -299,6 +315,8 @@ async function testHuntingAnimation() {
   await document.dispatch("visibilitychange");
   assert.equal(dialog.dataset.paused, "true");
   assert.equal(clock.scheduled.size, 0, "A hidden tab schedules no hunting work");
+  assert.equal(cascade.children.length, 0, "A hidden tab retains no animated cascade particles");
+  assert.equal(numbers.children.length, 0, "Hidden hunting targets are removed until visibility returns");
   const pausedNumbers = [...numbers.children];
   clock.advance(100000);
   assert.deepEqual(numbers.children, pausedNumbers);
@@ -307,6 +325,7 @@ async function testHuntingAnimation() {
   await document.dispatch("visibilitychange");
   assert.equal(dialog.dataset.paused, "false");
   assert.equal(numbers.children.length, 5);
+  assert.equal(cascade.children.length, 36, "Returning to a visible mobile page rebuilds the bounded cascade");
   assert.equal(clock.scheduled.size, 1);
   loading.finish(() => completed++);
   document.hidden = true;
@@ -323,13 +342,23 @@ async function testHuntingAnimation() {
   media.matches = true;
   await media.dispatch("change");
   assert.equal(hunter.dataset.action, "still");
+  assert.equal(cascade.children.length, 16, "Enabling reduced motion replaces the cascade with a sparse static scene");
   assert.equal(clock.scheduled.size, 0, "Enabling reduced motion stops the moving hunt immediately");
+  element("loading-scene").clientWidth = 1280;
+  element("loading-scene").clientHeight = 900;
+  await window.dispatch("resize");
+  assert.equal(cascade.children.length, 16, "Reduced motion retains its sparse density on resize");
+  media.matches = false;
+  await media.dispatch("change");
+  assert.equal(cascade.children.length, 64, "Disabling reduced motion restores the current desktop density");
+  assert.equal(clock.scheduled.size, 1, "The existing hunt resumes with one pending step");
   loading.cancel();
   assertCleanAnimation(session);
 
   const reduced = createSession({ reduced: true });
   reduced.window.roomLoading.start("create_room", () => {});
   assert.equal(reduced.element("loading-numbers").children.length, 5);
+  assert.equal(reduced.element("loading-cascade").children.length, 16);
   assert.equal(reduced.clock.scheduled.size, 0);
   let reducedFinished = 0;
   reduced.window.roomLoading.finish(() => reducedFinished++);
@@ -607,7 +636,7 @@ async function main() {
   await testEntryRaces();
   await testCombinedLifecycle();
   await testPageNavigation();
-  console.log("Room loading: viewport hunt/depth, home underlay through final red bite, reduced motion, hidden tabs, navigation/BFcache cleanup, admission, timeout, failure/retry, stale sockets, token-await cancellation and no additional requests passed");
+  console.log("Room loading: bounded desktop/mobile/static cascade, CSS-only particle lifecycle, viewport hunt/depth, home underlay through final red bite, reduced motion, hidden tabs, navigation/BFcache cleanup, admission, timeout, failure/retry, stale sockets, token-await cancellation and no additional requests passed");
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

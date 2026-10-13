@@ -1,9 +1,27 @@
 (() => {
+  const tuning = {
+    mobileWidth: 640,
+    shortHeight: 480,
+    cascadeDesktop: 64,
+    cascadeMobile: 36,
+    cascadeReduced: 16,
+    cascadeDuration: 18,
+    cascadeDurationSpread: 14,
+    hunterScale: 1.18,
+    mobileHunterScale: 1,
+    baseDepth: .78,
+    depthRange: .42,
+    huntTravelMin: 280,
+    huntTravelRange: 600,
+    huntPixelsPerMs: 1.7,
+    huntFocusDelay: 110
+  };
   const dialog = document.getElementById("room-loading");
   const title = document.getElementById("loading-title");
   const status = document.getElementById("loading-status");
   const scene = document.getElementById("loading-scene");
   const hud = document.getElementById("loading-hud");
+  const cascadeLayer = document.getElementById("loading-cascade");
   const numberLayer = document.getElementById("loading-numbers");
   const hunter = document.getElementById("loading-hunter");
   const facing = hunter.querySelector(".demon-facing");
@@ -29,6 +47,49 @@
   let onFinished = null;
   let previousFocus = null;
   let biteCount = 0;
+  let cascadeMode = null;
+
+  function hunterScale() {
+    return width > tuning.mobileWidth && height > tuning.shortHeight ? tuning.hunterScale : tuning.mobileHunterScale;
+  }
+
+  function hunterDepth(y) {
+    return hunterScale() * (tuning.baseDepth + tuning.depthRange * y);
+  }
+
+  function clearCascade() {
+    cascadeLayer.replaceChildren();
+    cascadeMode = null;
+  }
+
+  function populateCascade() {
+    if (state !== "waiting" || document.hidden) return;
+    const mode = motionPreference.matches ? "reduced" : width <= tuning.mobileWidth ? "mobile" : "desktop";
+    if (cascadeMode === mode) return;
+    cascadeMode = mode;
+    const count = tuning[`cascade${mode[0].toUpperCase()}${mode.slice(1)}`];
+    const particles = [];
+    for (let index = 0; index < count; index++) {
+      const particle = document.createElement("span");
+      particle.className = "cascade-number";
+      particle.textContent = String(Math.floor(Math.random() * 10));
+      const region = index / count;
+      const x = region < .7 ? 2 + Math.random() * 27 : region < .9 ? 79 + Math.random() * 19 : 34 + Math.random() * 41;
+      const depth = index % 4;
+      const duration = tuning.cascadeDuration + Math.random() * tuning.cascadeDurationSpread;
+      particle.style.setProperty("--cascade-x", `${x}%`);
+      particle.style.setProperty("--cascade-y", mode === "reduced" ? `${4 + Math.random() * 86}vh` : "-12vh");
+      particle.style.setProperty("--cascade-drift", `${-10 + Math.random() * 20}px`);
+      particle.style.setProperty("--cascade-duration", `${duration}s`);
+      particle.style.setProperty("--cascade-delay", `${-Math.random() * duration}s`);
+      particle.style.setProperty("--cascade-size", `${18 + depth * 6}px`);
+      particle.style.setProperty("--cascade-opacity", String(.10 + depth * .035));
+      particle.style.setProperty("--cascade-blur", `${[1.5, .85, .25, 0][depth]}px`);
+      particle.style.setProperty("--cascade-scale", String(.68 + depth * .16));
+      particles.push(particle);
+    }
+    cascadeLayer.replaceChildren(...particles);
+  }
 
   function setState(value) {
     state = value;
@@ -53,11 +114,11 @@
   }
 
   function placeHunter(duration = 0) {
-    let depth = .78 + .42 * location.y;
+    let depth = hunterDepth(location.y);
     location.x = Math.max(60 * depth / width, Math.min(1 - 60 * depth / width, location.x));
     location.y = Math.max(80 * depth / height, Math.min((Math.min(height, hudTop) - 80 * depth) / height, location.y));
-    depth = .78 + .42 * location.y;
-    hunter.style.transition = duration ? `transform ${duration}ms cubic-bezier(.32,.02,.65,1)` : "none";
+    depth = hunterDepth(location.y);
+    hunter.style.transition = duration ? `transform ${duration}ms cubic-bezier(.22,.61,.36,1)` : "none";
     hunter.style.transform = `translate3d(${location.x * width}px, ${location.y * height}px, 0) scale(${depth})`;
     hunter.style.setProperty("--depth-shadow", `${12 + (depth - .78) * 24}px`);
     hunter.style.zIndex = String(2 + Math.round(location.y * 4));
@@ -73,8 +134,9 @@
   }
 
   function mouthLocation(number) {
-    const y = (number.y * height + 30 * .78) / (height - 30 * .42);
-    const depth = .78 + .42 * y;
+    const scale = hunterScale();
+    const y = (number.y * height + 30 * scale * tuning.baseDepth) / (height - 30 * scale * tuning.depthRange);
+    const depth = hunterDepth(y);
     return { x: number.x - direction * 19 * depth / width, y };
   }
 
@@ -89,6 +151,7 @@
     });
     if (target) location = mouthLocation(target);
     placeHunter();
+    populateCascade();
   }
 
   function numberCoordinates(position, final) {
@@ -140,15 +203,15 @@
   function hunt() {
     if (state !== "waiting" || document.hidden || motionPreference.matches) return;
     setAction("scan");
-    direction *= -1;
-    facing.style.transform = `scaleX(${direction})`;
-    // Alternate nearest-prey fixation with abrupt turns toward a different number.
+    // Fixate on nearby prey, then occasionally pursue a distant number across the scene.
     const prey = [...numbers].sort((a, b) =>
       Math.hypot((a.x - location.x) * width, (a.y - location.y) * height) - Math.hypot((b.x - location.x) * width, (b.y - location.y) * height));
-    target = prey[biteCount % 3 === 2 ? prey.length - 1 : 0];
+    target = prey[biteCount % 4 === 3 ? prey.length - 1 : 0];
+    direction = target.x >= location.x ? 1 : -1;
+    facing.style.transform = `scaleX(${direction})`;
     later(() => {
       const distance = Math.hypot((target.x - location.x) * width, (target.y - location.y) * height);
-      const travel = 200 + Math.min(620, distance / 1.8);
+      const travel = tuning.huntTravelMin + Math.min(tuning.huntTravelRange, distance / tuning.huntPixelsPerMs);
       moveTo(target, travel);
       later(() => {
         setAction("bite");
@@ -162,7 +225,7 @@
           hunt();
         }, 170);
       }, travel);
-    }, 110);
+    }, tuning.huntFocusDelay);
   }
 
   function complete() {
@@ -174,6 +237,7 @@
 
   function finalFeast() {
     stopTimers();
+    clearCascade();
     clearNumbers();
     target = spawnNumber(true);
     setAction("alert");
@@ -211,8 +275,12 @@
     } else if (state === "waiting") {
       // A hidden tab does no hunting work. Resume from a clean five-number scene.
       hunter.style.transition = "none";
+      clearCascade();
       clearNumbers();
-      for (let index = 0; index < 5; index++) spawnNumber();
+      if (!document.hidden) {
+        populateCascade();
+        for (let index = 0; index < 5; index++) spawnNumber();
+      }
       setAction("still");
       hunt();
     }
@@ -221,6 +289,7 @@
   function cancel(restoreFocus = true) {
     stopTimers();
     setState("idle");
+    clearCascade();
     clearNumbers();
     setAction("still");
     onReturn = onRetry = onFinished = null;
@@ -249,7 +318,7 @@
     dialog.showModal();
     title.focus({ preventScroll: true });
     measure();
-    for (let index = 0; index < 5; index++) spawnNumber();
+    if (!document.hidden) for (let index = 0; index < 5; index++) spawnNumber();
     setAction("still");
     document.addEventListener("visibilitychange", visibilityChanged);
     window.addEventListener("resize", measure);
@@ -270,6 +339,7 @@
     stopTimers();
     setState("failed");
     dialog.classList.remove("loading-exit");
+    clearCascade();
     clearNumbers();
     setAction("still");
     hunter.style.transition = "none";

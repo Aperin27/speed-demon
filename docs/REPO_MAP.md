@@ -22,6 +22,7 @@ Speed Demon is a multiplayer arithmetic race: players create or join a room, the
 | `frontend/app.js` | Socket protocol, verified profile and permanent registration UI, copy-code action, eligibility indicator, connection cleanup, host controls, prompt buffer, advisory timer, signed server scores, results/replay and leaderboard states. |
 | `frontend/auth.js` | Optional Firebase SDK loading, popup Google login, logout and ID-token change notifications. Guest play survives SDK/config failure. |
 | `frontend/config.js` | Public Firebase web configuration; localhost selects local backend, other hosts select existing Render service. No Admin secrets. |
+| `frontend/numbers.js` | Homepage-only Canvas numeral cascade: four depth layers, cached grayscale glyph/fog textures, capped resolution and 30fps drawing. Observes screen state; pauses off-home, hidden tabs, forced colors and reduced motion (static composition). No network calls. |
 | `frontend/style.css` | Black/graphite/silver responsive design, system sans typography, layered panel edges, CSS calculator depth, focused game status/question panels, account/leaderboard/dialog styling and focus/reduced-motion/hidden rules. No external fonts or image assets. |
 | `firestore.rules`, `firestore.indexes.json`, `firebase.json` | Deny-all client rules, composite index and manual Firebase CLI deployment definitions. |
 | `vercel.json` | Static `frontend` output with no install/build command; no domain ownership metadata. |
@@ -29,6 +30,7 @@ Speed Demon is a multiplayer arithmetic race: players create or join a room, the
 | `tests/test_round_flow.py`, `tests/test_persistence.py` | Isolated handler/security, Firebase adapter/transaction, caching, rollover and outbox tests. |
 | `tests/test_frontend_replay.cjs`, `tests/test_frontend_auth.cjs` | Real client and auth script tests with DOM/socket/timer/SDK doubles. |
 | `tests/test_frontend_browser.cjs` | Optional real Edge/Playwright smoke test against isolated local servers; guest rounds, SDK-fake account layout, responsive screenshots, leaderboard fixtures, results and replay. Uses an existing Playwright installation. |
+| `tests/test_cascade_browser.cjs` | Optional real-browser cascade checks and screenshots at 320/390/768/1440/1920px; motion/static preferences, pointer access, unchanged foreground layout, idle requests and room-screen pause/resume. Hidden-tab event is controlled because headless Edge keeps tabs visible. |
 | `tests/test_usernames.py`, `tests/test_feature_browser.cjs` | Concurrent Firestore-transaction fakes, permanent names/profile endpoints, scoring-version isolation; real local Edge/Chrome registration, ranking eligibility, negative persistence and replay. |
 | `tests/test_security.py`, `docs/SECURITY.md` | Focused limiter/proxy/connection/expiration/fast-answer checks and documented controls, defaults, configuration and remaining risks. |
 | `tests/local_server.py` | Real local Uvicorn server backed by in-memory Firebase fakes; cannot access production Firebase. |
@@ -64,7 +66,7 @@ Authentication is optional. The Admin SDK checks Google provider, project/signat
 
 ## Frontend interaction and game data flow
 
-1. DOM IDs, CSS `.hidden` and `showScreen` preserve the home/lobby/countdown/game/results flow and focus transitions. `app-shell`'s `data-screen` controls spacing/background treatment. Account controls and the leaderboard are nested inside home, so countdown/game/lobby/results fully hide them. CSS also hides `.atmosphere` throughout countdown/game. The native User Guide dialog supports Escape and restores focus. Responsive controls, live feedback and reduced motion remain.
+1. DOM IDs, CSS `.hidden` and `showScreen` preserve the home/lobby/countdown/game/results flow and focus transitions. `app-shell`'s `data-screen` controls spacing/background treatment. Account controls and the leaderboard are nested inside home, so countdown/game/lobby/results fully hide them. CSS also hides `.atmosphere` throughout countdown/game. Its noninteractive, accessibility-hidden numeral canvas belongs only to home: `numbers.js` observes `data-screen` and cancels animation on every other screen or hidden tab. Reduced motion draws one static composition; forced colors stops drawing. Cached small glyphs bake in selective blur; reusable textured fog passes separate depth layers without full-screen filters. Resolution is capped at 1.5× DPR and 2.8 million pixels. The native User Guide dialog supports Escape and restores focus. Responsive controls, live feedback and reduced motion remain.
 2. `enterRoom` validates nickname/code, closes prior sockets and creates one connection. After opening, it sends an optional ID token followed by create/join. `joined` sets the server player ID; room events render player rows and ID-based host controls. Back closes the socket. Errors/disconnects are shown as notices; reconnect is a fresh lobby join, never an active-round restoration.
 3. `auth.js` loads only Firebase app/auth modules. `onIdTokenChanged` dispatches `auth-changed`; the app transports refreshed tokens privately to WebSocket and profile endpoints. A missing/broken SDK leaves guest play available. Signed-in unregistered players get a compact home prompt and a native registration dialog with a warning beneath the field, an explicit permanence acknowledgement, and a final confirmation dialog showing the exact username. The nickname field displays the verified username read-only for registered users. Lobby labels (Ranked, Guest · Unranked, Username required) use backend member eligibility, with no Google identity banner. Registration refreshes a connected socket profile without adding active-round eligibility.
 4. `game_started` resets local state, receives prompts without answers and computes advisory monotonic display times from server timestamps. The server ends the round independently. The client counts down, focuses answer input and renders progress/urgent time in minutes:seconds. Active UI shows own confirmed score and room code; the protocol provides no live opponent scores. Operand/operator text nodes allow distinct operator styling without HTML interpolation; question count has no fixed limit.
@@ -103,12 +105,15 @@ Focused commands:
 node --check frontend/app.js
 node --check frontend/auth.js
 node --check frontend/config.js
+node --check frontend/numbers.js
 node tests/test_frontend_replay.cjs
 node tests/test_frontend_auth.cjs
 git diff --check
 ```
 
 Use `.venv` or `python` instead if dependencies are available there. No additional test packages are needed. Handler/Firestore/auth tests use fakes, while the real browser smoke server exercises real HTTP/WebSocket transport and UI with a fake database. Neither proves deployed Auth/IAM/index/Firestore integration. See `docs/FIREBASE_SETUP.md` for manual settings and acceptance steps.
+
+With the same local servers and existing Playwright installation, `node tests/test_cascade_browser.cjs` checks the homepage animation and writes ignored `test-artifacts/cascade-*.png`. It intercepts Firebase SDK modules with guest-only doubles and uses the real local room transport. Hidden/visible events are tested with a controlled document visibility getter; actual OS background-tab suspension and physical-phone GPU performance require manual acceptance. Render timing output measures this local browser only.
 
 The backend suite includes 640 ordered submissions per duration (60/120/300/600 seconds), with simulated backend time, 32-question lookahead, private answer keys, −1 wrong-answer consumption, duplicate rejection and exact-deadline enforcement. The buffer is unchanged.
 

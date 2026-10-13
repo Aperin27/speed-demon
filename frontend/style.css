@@ -69,8 +69,17 @@ main:focus, .screen:focus { outline: none; }
 .skip-link { position: fixed; top: -100px; left: 16px; z-index: 20; padding: 12px 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
 .skip-link:focus { top: 16px; }
 
-/* Static, non-interactive forms give the home composition depth. */
+/* Non-interactive forms and the home-only numeral field sit behind the panels. */
 .atmosphere { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.number-atmosphere {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: linear-gradient(180deg, transparent, #000 8%, #000 86%, transparent);
+}
+#number-field { display: block; width: 100%; height: 100%; }
+body:has(#app-shell:not([data-screen="home"])) .number-atmosphere { display: none; }
 .orbital-form { position: absolute; width: 1200px; height: 1050px; top: 40px; left: calc(50% - 850px); opacity: .32; filter: blur(.4px); }
 .calculator-form {
   --calculator-unit: clamp(1.9px, .19vw, 2.75px);
@@ -249,6 +258,7 @@ dd { margin: 5px 0 0; color: #afb9c1; font-size: .8rem; line-height: 1.7; }
   .calculator-form { left: calc(50% - 30px); opacity: .21; }
 }
 @media (max-width: 600px) {
+  .number-atmosphere { opacity: .85; mask-image: linear-gradient(180deg, transparent, #000 4%, #000 86%, transparent); }
   .container { padding: 0 18px; }
   main { padding: 40px 0 28px; }
   #home-title { margin-bottom: 34px; font-size: clamp(2.25rem, 10.5vw, 3.5rem); letter-spacing: -.065em; }

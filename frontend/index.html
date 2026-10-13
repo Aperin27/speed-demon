@@ -18,6 +18,7 @@
       <ellipse cx="700" cy="550" rx="594" ry="304" transform="rotate(-35 700 550)" stroke="#c8d1d7" stroke-opacity=".09"/>
     </svg>
     <div class="calculator-form"><div class="calculator-display">π</div><div class="calculator-keys"><span>7</span><span>8</span><span>9</span><span>÷</span><span>4</span><span>5</span><span>6</span><span>×</span><span>1</span><span>2</span><span>3</span><span>−</span><span>0</span><span>·</span><span>=</span><span>+</span></div></div>
+    <div class="number-atmosphere" aria-hidden="true"><canvas id="number-field"></canvas></div>
   </div>
   <div class="container" id="app-shell" data-screen="home">
     <p id="app-notice" class="notice hidden" role="status" aria-live="polite"></p>
@@ -120,6 +121,6 @@
     <button id="username-final-cancel" class="button-quiet" type="button">Go back</button>
     <button id="username-final-register" class="button-primary" type="button">Confirm registration</button>
   </dialog>
-  <script src="config.js"></script><script src="auth.js"></script><script src="app.js"></script>
+  <script src="config.js"></script><script src="auth.js"></script><script src="app.js"></script><script src="numbers.js"></script>
 </body>
 </html>

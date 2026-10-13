@@ -51,6 +51,10 @@ let phase = "home";
 let lastToken;
 let profileGeneration = 0;
 let registrationPending = false;
+let roomEntry = null;
+let roomEntryTimeout = null;
+let roomWakeTimeout = null;
+let pendingEntryScreen = null;
 
 function applyProfile(profile) {
   window.speedDemonAuth.setUsername?.(profile.username);
@@ -82,12 +86,16 @@ async function refreshProfile() {
   } finally { clearTimeout(timeout); }
 }
 
-function showScreen(screen) {
+function showScreen(screen, preventScroll = false) {
+  if (roomEntry && window.roomLoading?.isActive() && screen !== homeScreen) {
+    pendingEntryScreen = screen;
+    return;
+  }
   [homeScreen, lobbyScreen, countdownScreen, gameScreen, resultScreen].forEach((element) => element.classList.add("hidden"));
   screen.classList.remove("hidden");
   document.getElementById("app-shell").setAttribute("data-screen", screen.id.replace("-screen", ""));
   if (screen === countdownScreen || screen === gameScreen) notice("");
-  screen.focus();
+  screen.focus({ preventScroll });
 }
 
 function notice(message) {
@@ -135,7 +143,11 @@ function resetRound() {
   score = 0;
 }
 
-function disconnect() {
+function disconnect({ preserveScroll = false } = {}) {
+  clearRoomEntryTimers();
+  roomEntry = null;
+  pendingEntryScreen = null;
+  window.roomLoading?.cancel();
   resetRound();
   const oldSocket = socket;
   socket = null;
@@ -146,30 +158,79 @@ function disconnect() {
   createRoomBtn.disabled = false;
   joinRoomBtn.disabled = false;
   showConnectionMessage("");
+  showScreen(homeScreen, preserveScroll);
+}
+
+function clearRoomEntryTimers() {
+  clearTimeout(roomEntryTimeout);
+  clearTimeout(roomWakeTimeout);
+  roomEntryTimeout = roomWakeTimeout = null;
+}
+
+function failRoomEntry(message) {
+  if (!roomEntry) return;
+  const request = roomEntry.request;
+  clearRoomEntryTimers();
+  roomEntry = null;
+  pendingEntryScreen = null;
+  const oldSocket = socket;
+  socket = null;
+  if (oldSocket) oldSocket.close();
+  resetRound();
+  roomCode = "";
+  playerId = "";
+  phase = "home";
+  createRoomBtn.disabled = false;
+  joinRoomBtn.disabled = false;
+  showConnectionMessage("");
   showScreen(homeScreen);
+  if (window.roomLoading) window.roomLoading.fail(message, () => connectWebSocket(request), disconnect);
+  else notice(message);
 }
 
 function connectWebSocket(request) {
-  disconnect();
+  disconnect({ preserveScroll: true });
   notice("");
   createRoomBtn.disabled = true;
   joinRoomBtn.disabled = true;
-  showConnectionMessage("Connecting to the game server… Free hosting may take 30 seconds to wake.");
-  const connection = new WebSocket(BACKEND_WS_URL);
+  roomEntry = { request, connection: null, confirmed: false };
+  if (window.roomLoading) window.roomLoading.start(request.type, disconnect);
+  else showConnectionMessage("Connecting to the game server… Free hosting may take 30 seconds to wake.");
+  roomWakeTimeout = setTimeout(() => {
+    window.roomLoading?.setStatus("The server is waking up. Your room request is still connecting…");
+  }, 12000);
+  roomEntryTimeout = setTimeout(() => {
+    failRoomEntry("The server took too long to respond. Retry, or return home and try again shortly.");
+  }, 90000);
+  let connection;
+  try { connection = new WebSocket(BACKEND_WS_URL); }
+  catch { failRoomEntry("Could not connect to the server. Check your connection and retry."); return; }
   socket = connection;
+  roomEntry.connection = connection;
   lastToken = undefined;
   connection.onopen = async () => {
     await syncAuthentication(connection);
-    if (socket === connection) send(request);
+    if (socket === connection && roomEntry?.connection === connection && !roomEntry.confirmed) {
+      window.roomLoading?.setStatus(request.type === "join_room" ? "Joining your room…" : "Creating your room…");
+      send(request);
+    }
   };
   connection.onmessage = (event) => {
     if (socket !== connection) return;
     try { receiveMessage(JSON.parse(event.data)); }
-    catch { notice("The server sent an invalid response. Rejoin the room."); }
+    catch {
+      if (roomEntry) failRoomEntry("The server sent an invalid response. Retry to enter your room.");
+      else notice("The server sent an invalid response. Rejoin the room.");
+    }
   };
-  connection.onerror = () => { if (socket === connection) notice("Could not reach the server. Check your connection."); };
+  connection.onerror = () => {
+    if (socket !== connection) return;
+    if (roomEntry) failRoomEntry("Could not reach the server. Check your connection and retry.");
+    else notice("Could not reach the server. Check your connection.");
+  };
   connection.onclose = () => {
     if (socket !== connection) return;
+    if (roomEntry) { failRoomEntry("The connection closed before your room was ready. Retry to connect again."); return; }
     disconnect();
     notice("Disconnected. Rejoin a lobby to play again; interrupted rounds do not qualify for rankings.");
   };
@@ -191,6 +252,23 @@ function receiveMessage(data) {
       phase = "lobby";
       showConnectionMessage("");
       showScreen(lobbyScreen);
+      if (roomEntry && !roomEntry.confirmed && ["room_created", "player_joined"].includes(data.type)) {
+        clearRoomEntryTimers();
+        roomEntry.confirmed = true;
+        const entry = roomEntry;
+        if (window.roomLoading) {
+          window.roomLoading.finish(() => {
+            if (roomEntry !== entry) return;
+            roomEntry = null;
+            // A host can start while a joining player's final bite is still playing.
+            const activeScreen = { lobby: lobbyScreen, countdown: countdownScreen, game: gameScreen, waiting: resultScreen, results: resultScreen }[phase];
+            const nextScreen = pendingEntryScreen || activeScreen;
+            pendingEntryScreen = null;
+            if (nextScreen) showScreen(nextScreen);
+            if (phase === "game") answerInput.focus();
+          });
+        } else roomEntry = null;
+      }
     }
   }
   if (data.type === "auth_status") {
@@ -230,6 +308,10 @@ function receiveMessage(data) {
     showScreen(resultScreen);
   }
   if (data.type === "error") {
+    if (roomEntry && ["create_room", "join_room"].includes(data.request_type)) {
+      failRoomEntry(data.message);
+      return;
+    }
     notice(data.message);
     createRoomBtn.disabled = false;
     joinRoomBtn.disabled = false;
@@ -385,6 +467,7 @@ function endGame() {
 }
 
 function enterRoom(type) {
+  if (createRoomBtn.disabled || joinRoomBtn.disabled || window.roomLoading?.isActive()) return;
   nickname = nicknameInput.value.trim();
   if (!nickname || nickname.length > 24) {
     notice("Enter a nickname of 1–24 characters.");
@@ -407,6 +490,7 @@ joinRoomBtn.addEventListener("click", () => enterRoom("join_room"));
 startBtn.addEventListener("click", requestStartGame);
 submitBtn.addEventListener("click", submitAnswer);
 backBtn.addEventListener("click", disconnect);
+window.addEventListener("pagehide", disconnect);
 answerInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.repeat) { event.preventDefault(); submitAnswer(); }
 });
